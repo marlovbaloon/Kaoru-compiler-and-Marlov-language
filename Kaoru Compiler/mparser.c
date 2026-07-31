@@ -62,7 +62,38 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
     /* check function Parse and Scope { }; */
     printf("[Kaoru Compiler]: Permissions Validated. Hardware Hash Injected.\n");
 } 
+void free_ast(ASTNode *node) {
+    // Base Case: if Node is NULL equal stop
+    if (node == NULL) {
+        return;
+    }
+    free_ast(node->left);
+    free_ast(node->right);
+    free(node);
+}
+ASTNode* create_var_decl_node(char* name, ASTNode* expr) {
+    ASTNode *node = malloc(sizeof(ASTNode));
+    node->type = NODE_VAR_DECL;
+    strcpy(node->var_name, name);
+    node->left = expr; 
+    node->right = NULL;
+    return node;
+}
+ASTNode* create_int_node(int val) {
+    ASTNode *node = malloc(sizeof(ASTNode));
+    node->type = NODE_INT;
+    node->val = val;
+    node->left = node->right = NULL;
+return node;
+} 
+ASTNode* create_add_node(ASTNode*left, ASTNode*right){
+  ASTNode *node = malloc(sizeof(ASTNode));
+  node->type = NODE_ADD;
+  node->left = left;
+  node->right = right;
+  return node;
 
+}
 ASTNode* parse(FILE *in) {
     Token tok = next_token(in);
     // Case 1: 

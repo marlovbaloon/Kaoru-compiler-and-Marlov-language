@@ -29,29 +29,7 @@ typedef struct ASTNode{
     struct ASTNode *left;
     struct ASTNode *right;
 } ASTNode;
-ASTNode* create_var_decl_node(char* name, ASTNode* expr) {
-    ASTNode *node = malloc(sizeof(ASTNode));
-    node->type = NODE_VAR_DECL;
-    strcpy(node->var_name, name);
-    node->left = expr; 
-    node->right = NULL;
-    return node;
-}
-ASTNode* create_int_node(int val) {
-    ASTNode *node = malloc(sizeof(ASTNode));
-    node->type = NODE_INT;
-    node->val = val;
-    node->left = node->right = NULL;
-return node;
-} 
-ASTNode* create_add_node(ASTNode*left, ASTNode*right){
-  ASTNode *node = malloc(sizeof(ASTNode));
-  node->type = NODE_ADD;
-  node->left = left;
-  node->right = right;
-  return node;
 
-}
 typedef struct {
     TokenType type;
     char value[64];

@@ -16,15 +16,20 @@ Token next_token(FILE *file) {
         if (c == '@') {
             char buffer[32] = "@";
             int idx = 1;
-            while (isalpha(c = fgetc(file)) || c == '.') {
-                buffer[idx++] = c;
-            } else{
-                printf("Kaoru Error: TL;DR No Cap Fr Fr\n");
-                break;
-            }
-            ungetc(c, file);
+            while ((c = fgetc(file)) != EOF) {
+                if (isalpha(c) || c == '.') {
+                    if (idx < 31) { 
+                        buffer[idx++] = c;
+                    }
+                } else {
+                    ungetc(c, file);
+                    break;
+                }
+            }           
             buffer[idx] = '\0';
-
+            if (idx == 1) {
+                printf("Kaoru Error: TL;DR No Cap Fr Fr\n"); 
+            }
             strcpy(tok.value, buffer);
             if (strcmp(buffer, "@sys.disk.read") == 0) tok.type = TOKEN_AT_SYS;
             else if (strcmp(buffer, "@func") == 0) tok.type = TOKEN_AT_FUNC;

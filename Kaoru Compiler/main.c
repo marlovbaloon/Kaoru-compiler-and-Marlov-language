@@ -22,6 +22,7 @@ int main(int argc, char *argv[]) {
         printf("Error: Cannot open source file %s\n", argv[1]);
         return 1;
     }
+   
 
     /* make Security Context im bits*/
     SecurityContext sec_ctx;
@@ -30,7 +31,9 @@ int main(int argc, char *argv[]) {
 
     /* analysis file */
     parse_program(source, &sec_ctx);
-
+    ASTNode *root = parse(source);
+    free_ast(root);
+    root = NULL;
     fclose(source);
     printf("[Kaoru Compiler]: Compilation Successful! Executable Generated.\n");
     return 0;
