@@ -30,7 +30,7 @@ Token next_token(FILE *file) {
             if (idx == 1) {
                 printf("Kaoru Error: TL;DR No Cap Fr Fr\n"); 
             }
-            strcpy(tok.value, buffer);
+            snprintf(tok.value, buffer);
             if (strcmp(buffer, "@sys.disk.read") == 0) tok.type = TOKEN_AT_SYS;
             else if (strcmp(buffer, "@func") == 0) tok.type = TOKEN_AT_FUNC;
             else if (strcmp(buffer, "@int") == 0) tok.type = TOKEN_AT_INT;

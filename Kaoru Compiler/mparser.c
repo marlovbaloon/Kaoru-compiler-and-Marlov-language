@@ -7,7 +7,7 @@ extern Token next_token(FILE *f);
 
 /* Parse isolated block statement {}; or standard control block {} */
 static void parse_block(FILE *in, Token *current_tok);
-static void parse_block(FILE *in, Token *current_tok) {
+static bool parse_block(FILE *in, Token *current_tok) {
     /* current_tok starts at TOKEN_LBRACE '{' */
     int depth = 1;
 
@@ -16,7 +16,8 @@ static void parse_block(FILE *in, Token *current_tok) {
 
         if (current_tok->type == TOKEN_EOF) {
             /* Error: Unterminated block */
-            exit(1);
+            printf("IDK you block (Unterminated scope!)");
+            return false;
         }
 
         if (current_tok->type == TOKEN_LBRACE) {
@@ -41,6 +42,7 @@ static void parse_block(FILE *in, Token *current_tok) {
          * Expression / Control Flow Block: Pass return value up
          */
     }
+    return true;
 }
 
 void parse_program(FILE *in, SecurityContext *sec_ctx) {
@@ -63,7 +65,25 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
     printf("[Kaoru Compiler]: Permissions Validated. Hardware Hash Injected.\n");
 } 
 void free_ast(ASTNode *node) {
-    // Base Case: if Node is NULL equal stop
+    if (tok.type == TOKEN_AT_INT) {
+        Token var_name = next_token(in); 
+        // Syntax Check: after @int it is var name (TOKEN_IDENTIFIER)
+        if (var_name.type != TOKEN_IDENTIFIER) {
+            printf("Kaoru Syntax Error: Expected variable name after '@int', got '%s'\n", var_name.value);
+            return NULL;
+        }
+
+        Token assign_op = next_token(in); 
+        // Syntax Check: follow with symbol '=' 
+        if (strcmp(assign_op.value, "=") != 0 && assign_op.type != TOKEN_ASSIGN) {
+            printf("[Kaoru Syntax Error]: Expected '=' after variable name '%s'\n", var_name.value);
+            return NULL;
+        }
+        Token val_tok = next_token(in);   
+        ASTNode *val_node = create_int_node(atoi(val_tok.value));
+        return create_var_decl_node(var_name.value, val_node);
+    }
+     // Base Case: if Node is NULL equal stop
     if (node == NULL) {
         return;
     }
@@ -74,6 +94,7 @@ void free_ast(ASTNode *node) {
 ASTNode* create_var_decl_node(char* name, ASTNode* expr) {
     ASTNode *node = malloc(sizeof(ASTNode));
     node->type = NODE_VAR_DECL;
+    
     strcpy(node->var_name, name);
     node->left = expr; 
     node->right = NULL;
