@@ -1,3 +1,4 @@
+//mtypes.h
 #ifndef MTYPES_H
 #define MTYPES_H
 
@@ -19,23 +20,37 @@ typedef enum {
     TOKEN_AND, TOKEN_OR, TOKEN_NOT, TOKEN_IF, TOKEN_ELSE, TOKEN_WHILE, TOKEN_RETURN
 } TokenType;
 
-typedef enum  { NODE_INT, NODE_ADD} NodeType;
-}
-typedef struct {
-  NodeType type;
-  int val;
-  struct ASTNode *left;//For NODE_ADD(left)
-  struct ASTNode *Right;// For NODE_ADD(right)
+typedef enum  { NODE_INT, NODE_ADD,NODE_VAR_DECl} NodeType;
+
+typedef struct ASTNode{
+    NodeType type;
+    int val;
+    char var_name[32];
+    struct ASTNode *left;
+    struct ASTNode *right;
+} ASTNode;
+ASTNode* create_var_decl_node(char* name, ASTNode* expr) {
+    ASTNode *node = malloc(sizeof(ASTNode));
+    node->type = NODE_VAR_DECL;
+    strcpy(node->var_name, name);
+    node->left = expr; 
+    node->right = NULL;
+    return node;
 }
 ASTNode* create_int_node(int val) {
-ASTNode *node = malloc(sizeof(ASTNode));
-node->type = NODE_INT;
-node->val = val;
-node->leaft = node->right = NULL;
+    ASTNode *node = malloc(sizeof(ASTNode));
+    node->type = NODE_INT;
+    node->val = val;
+    node->left = node->right = NULL;
 return node;
 } 
 ASTNode* create_add_node(ASTNode*left, ASTNode*right){
-  
+  ASTNode *node = malloc(sizeof(ASTNode));
+  node->type = NODE_ADD;
+  node->left = left;
+  node->right = right;
+  return node;
+
 }
 typedef struct {
     TokenType type;

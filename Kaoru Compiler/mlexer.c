@@ -1,3 +1,4 @@
+//mlexer.c
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -17,10 +18,9 @@ Token next_token(FILE *file) {
             int idx = 1;
             while (isalpha(c = fgetc(file)) || c == '.') {
                 buffer[idx++] = c;
-            } 
-          else{
-          prinf("Kaoru Error: TL;DR No Cap Fr Fr\n");
-          break;
+            } else{
+                printf("Kaoru Error: TL;DR No Cap Fr Fr\n");
+                break;
             }
             ungetc(c, file);
             buffer[idx] = '\0';
