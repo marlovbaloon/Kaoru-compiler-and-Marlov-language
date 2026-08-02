@@ -1,4 +1,4 @@
-//mparser.c
+// mparser.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -7,9 +7,74 @@
 
 extern Token next_token(FILE *f); 
 
-/* Forward declaration */
-static bool parse_block(FILE *in, Token *current_tok);
 
+ //AST Node Creation Helpers
+ 
+ASTNode* create_int_node(int val) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node) {
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        exit(1);
+    }
+    node->type = NODE_INT;
+    node->val = val;
+    node->var_name[0] = '\0';
+    node->left = NULL;
+    node->right = NULL;
+    return node;
+} 
+
+ASTNode* create_add_node(ASTNode* left, ASTNode* right) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node) {
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        exit(1);
+    }
+    node->type = NODE_ADD;
+    node->val = 0;
+    node->var_name[0] = '\0';
+    node->left = left;
+    node->right = right;
+    return node;
+}
+ASTNode* create_sub_node(ASTNode* left, ASTNode* right) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node) {
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        exit(1);
+    }
+    node->type = NODE_SUB;
+    node->val = 0;
+    node->var_name[0] = '\0';
+    node->left = left;
+    node->right = right;
+    return node;
+}
+ASTNode* create_var_decl_node(const char* name, ASTNode* expr) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node) {
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        exit(1);
+    }
+    node->type = NODE_VAR_DECL;
+    node->val = 0;
+    strncpy(node->var_name, name, sizeof(node->var_name) - 1);
+    node->var_name[sizeof(node->var_name) - 1] = '\0';
+    node->left = expr; 
+    node->right = NULL;
+    return node;
+}
+
+void free_ast(ASTNode *node) {
+    if (node == NULL) return;
+    free_ast(node->left);
+    free_ast(node->right);
+    free(node);
+}
+
+
+ //Security & Block Parsing Functions
+ 
 static bool parse_block(FILE *in, Token *current_tok) {
     /* current_tok starts at TOKEN_LBRACE '{' */
     int depth = 1;
@@ -58,73 +123,92 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
 } 
 
 
-void free_ast(ASTNode *node) {
-    if (node == NULL) {
-        return;
+ //Expression & Statement Recursive Descent Parser
+
+
+/* Primary Expression: Handles basic terms like Numbers */
+static ASTNode* parse_primary(FILE *in, Token *current_tok) {
+    if (current_tok->type == TOKEN_NUMBER) {
+        ASTNode *node = create_int_node(atoi(current_tok->value));
+        *current_tok = next_token(in); // Consume the number
+        return node;
     }
-    free_ast(node->left);
-    free_ast(node->right);
-    free(node);
+    printf("[Kaoru Syntax Error Line %u]: Expected number, got '%s'\n", current_tok->line, current_tok->value);
+    return NULL;
 }
 
-ASTNode* create_var_decl_node(char* name, ASTNode* expr) {
-    ASTNode *node = malloc(sizeof(ASTNode));
-    node->type = NODE_VAR_DECL;
-    strcpy(node->var_name, name);
-    node->left = expr; 
-    node->right = NULL;
-    return node;
+/* Additive Expression: Handles '+' and '-' with Left-to-Right Associativity */
+static ASTNode* parse_expression(FILE *in, Token *current_tok) {
+    ASTNode *left = parse_primary(in, current_tok);
+    if (!left) return NULL;
+    while (current_tok->type == TOKEN_PLUS || current_tok->type == TOKEN_MINUS) {
+        TokenType op = current_tok->type;
+        *current_tok = next_token(in); // Consume '+' or '-'
+        ASTNode *right = parse_primary(in, current_tok);
+        if (!right) {
+            free_ast(left); // if right node clash, clear node left protect from Memory Leak
+            return NULL;
+        }
+
+        if (op == TOKEN_PLUS) {
+            left = create_add_node(left, right);
+        } else if (op == TOKEN_MINUS) {
+            left = create_sub_node(left, right); // or make node minus
+        }
+    }
+    return left;
 }
 
-ASTNode* create_int_node(int val) {
-    ASTNode *node = malloc(sizeof(ASTNode));
-    node->type = NODE_INT;
-    node->val = val;
-    node->left = node->right = NULL;
-    return node;
-} 
-
-ASTNode* create_add_node(ASTNode* left, ASTNode* right){
-    ASTNode *node = malloc(sizeof(ASTNode));
-    node->type = NODE_ADD;
-    node->left = left;
-    node->right = right;
-    return node;
-}
-
-
-ASTNode* parse(FILE *in) {
-    Token tok = next_token(in); 
-
-    // Case 1
-    if (tok.type == TOKEN_AT_INT) {
-        Token var_name = next_token(in); 
+/* Statement Parser: Handles variable declarations and expressions */
+ASTNode* parse_statement(FILE *in, Token *current_tok) {
+    /* Case 1: Variable Declaration (@int <var_name> = <expr>;) */
+    if (current_tok->type == TOKEN_AT_INT) {
+        *current_tok = next_token(in); // Consume '@int'
         
-        // Syntax Check: @int is var name
-        if (var_name.type != TOKEN_IDENTIFIER) {
-            printf("[Kaoru Syntax Error]: Expected variable name after '@int', got '%s'\n", var_name.value);
+        if (current_tok->type != TOKEN_IDENTIFIER) {
+            printf("[Kaoru Syntax Error Line %u]: Expected variable name after '@int', got '%s'\n", 
+                   current_tok->line, current_tok->value);
             return NULL;
         }
 
-        Token assign_op = next_token(in); 
-        // Syntax Check:  '=' 
-        if (strcmp(assign_op.value, "=") != 0 && assign_op.type != TOKEN_ASSIGN) {
-            printf("[Kaoru Syntax Error]: Expected '=' after variable name '%s'\n", var_name.value);
+        char var_name[32];
+        strncpy(var_name, current_tok->value, sizeof(var_name) - 1);
+        var_name[sizeof(var_name) - 1] = '\0';
+
+        *current_tok = next_token(in); // Consume identifier
+        if (current_tok->type != TOKEN_ASSIGN) {
+            printf("[Kaoru Syntax Error Line %u]: Expected '=' after variable name '%s'\n", 
+                   current_tok->line, var_name);
             return NULL;
         }
 
-        Token val_tok = next_token(in);   
-        ASTNode *val_node = create_int_node(atoi(val_tok.value));
-        return create_var_decl_node(var_name.value, val_node);
+        *current_tok = next_token(in); // Consume '='
+
+        ASTNode *expr = parse_expression(in, current_tok);
+        if (!expr) return NULL;
+
+        if (current_tok->type == TOKEN_SEMICOLON) {
+            *current_tok = next_token(in); // Consume ';'
+        } else {
+            printf("[Kaoru Syntax Error Line %u]: Expected ';' at end of declaration\n", current_tok->line);
+            free_ast(expr);
+            return NULL;
+        }
+
+        return create_var_decl_node(var_name, expr);
     }
 
-    // Case 2
-    ASTNode *left = create_int_node(atoi(tok.value));
-    Token op = next_token(in); 
-    if (op.type == TOKEN_EOF || op.type == TOKEN_SEMICOLON) {
-        return left; 
+    /* Case 2: Standalone Expression (e.g. 10 + 20;) */
+    ASTNode *expr = parse_expression(in, current_tok);
+    if (expr && current_tok->type == TOKEN_SEMICOLON) {
+        *current_tok = next_token(in); // Consume ';'
     }
-    Token t2 = next_token(in); 
-    ASTNode *right = create_int_node(atoi(t2.value));
-    return create_add_node(left, right);
+    return expr;
+}
+
+/* Wrapper entry-point parser function */
+ASTNode* parse(FILE *in) {
+    Token tok = next_token(in);
+    if (tok.type == TOKEN_EOF) return NULL;
+    return parse_statement(in, &tok);
 }
