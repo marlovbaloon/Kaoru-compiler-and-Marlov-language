@@ -7,9 +7,9 @@
 
 extern Token next_token(FILE *f); 
 
-
- //AST Node Creation Helpers
- 
+/* =========================================================================
+ * AST Node Creation Helpers
+ * ========================================================================= */
 ASTNode* create_int_node(int val) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) {
@@ -37,6 +37,7 @@ ASTNode* create_add_node(ASTNode* left, ASTNode* right) {
     node->right = right;
     return node;
 }
+
 ASTNode* create_sub_node(ASTNode* left, ASTNode* right) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) {
@@ -50,6 +51,35 @@ ASTNode* create_sub_node(ASTNode* left, ASTNode* right) {
     node->right = right;
     return node;
 }
+
+ASTNode* create_mul_node(ASTNode* left, ASTNode* right) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node) {
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        exit(1);
+    }
+    node->type = NODE_MUL;
+    node->val = 0;
+    node->var_name[0] = '\0';
+    node->left = left;
+    node->right = right;
+    return node;
+}
+
+ASTNode* create_div_node(ASTNode* left, ASTNode* right) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node) {
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        exit(1);
+    }
+    node->type = NODE_DIV;
+    node->val = 0;
+    node->var_name[0] = '\0';
+    node->left = left;
+    node->right = right;
+    return node;
+}
+
 ASTNode* create_var_decl_node(const char* name, ASTNode* expr) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) {
@@ -64,7 +94,16 @@ ASTNode* create_var_decl_node(const char* name, ASTNode* expr) {
     node->right = NULL;
     return node;
 }
-
+ASTNode* create_string_node(const char* str_val) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node) exit(1);
+    node->type = NODE_STRING;
+    node->val = 0;
+    strncpy(node->var_name, str_val, sizeof(node->var_name) - 1); // use var_name or add char str_val[] in struct 
+    node->left = NULL;
+    node->right = NULL;
+    return node;
+}
 void free_ast(ASTNode *node) {
     if (node == NULL) return;
     free_ast(node->left);
@@ -72,9 +111,9 @@ void free_ast(ASTNode *node) {
     free(node);
 }
 
-
- //Security & Block Parsing Functions
- 
+/* =========================================================================
+ * Security & Block Parsing Functions
+ * ========================================================================= */
 static bool parse_block(FILE *in, Token *current_tok) {
     /* current_tok starts at TOKEN_LBRACE '{' */
     int depth = 1;
@@ -122,51 +161,94 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
     printf("[Kaoru Compiler]: Permissions Validated. Hardware Hash Injected.\n");
 } 
 
+/* =========================================================================
+ * Expression & Statement Recursive Descent Parser
+ * ========================================================================= */
 
- //Expression & Statement Recursive Descent Parser
-
-
-/* Primary Expression: Handles basic terms like Numbers */
+/* Primary Expression: Handles Numbers, Strings, and Variable Identifiers */
 static ASTNode* parse_primary(FILE *in, Token *current_tok) {
     if (current_tok->type == TOKEN_NUMBER) {
         ASTNode *node = create_int_node(atoi(current_tok->value));
-        *current_tok = next_token(in); // Consume the number
+        *current_tok = next_token(in); // Consume number
         return node;
     }
-    printf("[Kaoru Syntax Error Line %u]: Expected number, got '%s'\n", current_tok->line, current_tok->value);
+    
+    if (current_tok->type == TOKEN_STRING_LIT) {
+        ASTNode *node = create_string_node(current_tok->value);
+        *current_tok = next_token(in); // Consume string
+        return node;
+    }
+
+    if (current_tok->type == TOKEN_IDENTIFIER) {
+        ASTNode *node = create_string_node(current_tok->value); // or make create_id_node if have NODE_IDENTIFIER
+        *current_tok = next_token(in); // Consume identifier
+        return node;
+    }
+
+    printf("[Kaoru Syntax Error Line %u]: Expected number, string, or identifier, got '%s'\n", 
+           current_tok->line, current_tok->value);
     return NULL;
 }
 
-/* Additive Expression: Handles '+' and '-' with Left-to-Right Associativity */
-static ASTNode* parse_expression(FILE *in, Token *current_tok) {
+/* Multiplicative Expression: Handles '*' and '/' (Higher Precedence) */
+static ASTNode* parse_multiplicative(FILE *in, Token *current_tok) {
     ASTNode *left = parse_primary(in, current_tok);
     if (!left) return NULL;
+
+    while (current_tok->type == TOKEN_STAR || current_tok->type == TOKEN_SLASH) {
+        TokenType op = current_tok->type;
+        *current_tok = next_token(in); // Consume '*' or '/'
+
+        ASTNode *right = parse_primary(in, current_tok);
+        if (!right) {
+            free_ast(left);
+            return NULL;
+        }
+
+        if (op == TOKEN_STAR) {
+            left = create_mul_node(left, right);
+        } else if (op == TOKEN_SLASH) {
+            left = create_div_node(left, right);
+        }
+    }
+
+    return left;
+}
+
+/* Additive Expression: Handles '+' and '-' (Lower Precedence) */
+static ASTNode* parse_expression(FILE *in, Token *current_tok) {
+    ASTNode *left = parse_multiplicative(in, current_tok);
+    if (!left) return NULL;
+
     while (current_tok->type == TOKEN_PLUS || current_tok->type == TOKEN_MINUS) {
         TokenType op = current_tok->type;
         *current_tok = next_token(in); // Consume '+' or '-'
-        ASTNode *right = parse_primary(in, current_tok);
+
+        ASTNode *right = parse_multiplicative(in, current_tok);
         if (!right) {
-            free_ast(left); // if right node clash, clear node left protect from Memory Leak
+            free_ast(left);
             return NULL;
         }
 
         if (op == TOKEN_PLUS) {
             left = create_add_node(left, right);
         } else if (op == TOKEN_MINUS) {
-            left = create_sub_node(left, right); // or make node minus
+            left = create_sub_node(left, right);
         }
     }
+
     return left;
 }
 
 /* Statement Parser: Handles variable declarations and expressions */
 ASTNode* parse_statement(FILE *in, Token *current_tok) {
-    /* Case 1: Variable Declaration (@int <var_name> = <expr>;) */
-    if (current_tok->type == TOKEN_AT_INT) {
-        *current_tok = next_token(in); // Consume '@int'
+    /* Case 1: Variable Declaration (@int or @str <var_name> = <expr>;) */
+    if (current_tok->type == TOKEN_AT_INT || current_tok->type == TOKEN_AT_STR) {
+        TokenType decl_type = current_tok->type;
+        *current_tok = next_token(in); // Consume type token (@int / @str)
         
         if (current_tok->type != TOKEN_IDENTIFIER) {
-            printf("[Kaoru Syntax Error Line %u]: Expected variable name after '@int', got '%s'\n", 
+            printf("[Kaoru Syntax Error Line %u]: Expected variable name after type, got '%s'\n", 
                    current_tok->line, current_tok->value);
             return NULL;
         }
@@ -198,13 +280,15 @@ ASTNode* parse_statement(FILE *in, Token *current_tok) {
         return create_var_decl_node(var_name, expr);
     }
 
-    /* Case 2: Standalone Expression (e.g. 10 + 20;) */
+    /* Case 2: Standalone Expression (e.g. 10 + 20 * 3;) */
     ASTNode *expr = parse_expression(in, current_tok);
     if (expr && current_tok->type == TOKEN_SEMICOLON) {
         *current_tok = next_token(in); // Consume ';'
     }
     return expr;
 }
+
+
 
 /* Wrapper entry-point parser function */
 ASTNode* parse(FILE *in) {

@@ -21,7 +21,12 @@ typedef enum {
     TOKEN_AND, TOKEN_OR, TOKEN_NOT, TOKEN_IF, TOKEN_ELSE, TOKEN_WHILE, TOKEN_RETURN
 } TokenType;
 
-typedef enum  { NODE_INT, NODE_ADD,NODE_VAR_DECL)odeType;
+typedef enum  { 
+    NODE_INT, NODE_ADD,NODE_VAR_DECL, 
+    NODE_MUL, NODE_DIV, NODE_SUB,
+    NODE_STR,
+
+}nodeType;
 
 typedef struct ASTNode{
     NodeType type;
