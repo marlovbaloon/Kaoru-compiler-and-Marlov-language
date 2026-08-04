@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include "mtypes.h"
-
+#include "marloru.c"
 #define KAORU_VERSION "1.0.0"
 
 extern uint64_t get_hardware_signature();
@@ -24,8 +24,9 @@ static void print_usage(const char *prog_name) {
 }
 
 int main(int argc, char *argv[]) {
+    
     if (argc < 2) {
-        print_usage(argv[0]);
+        run_marloru_editor();
         return 1;
     }
 
