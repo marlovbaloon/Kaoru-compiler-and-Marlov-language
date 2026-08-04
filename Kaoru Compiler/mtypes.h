@@ -24,9 +24,9 @@ typedef enum {
 typedef enum  { 
     NODE_INT, NODE_ADD,NODE_VAR_DECL, 
     NODE_MUL, NODE_DIV, NODE_SUB,
-    NODE_STR,
+    NODE_STR, NODE_BOOL,
 
-}nodeType;
+}NodeType;
 
 typedef struct ASTNode{
     NodeType type;

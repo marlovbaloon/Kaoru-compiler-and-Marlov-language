@@ -7,6 +7,9 @@
 
 extern Token next_token(FILE *f); 
 
+/* Forward declaration for parse_primary to use parse_expression inside parentheses */
+static ASTNode* parse_expression(FILE *in, Token *current_tok);
+
 /* =========================================================================
  * AST Node Creation Helpers
  * ========================================================================= */
@@ -94,16 +97,32 @@ ASTNode* create_var_decl_node(const char* name, ASTNode* expr) {
     node->right = NULL;
     return node;
 }
+
 ASTNode* create_string_node(const char* str_val) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) exit(1);
-    node->type = NODE_STRING;
+    node->type = NODE_STR;
     node->val = 0;
-    strncpy(node->var_name, str_val, sizeof(node->var_name) - 1); // use var_name or add char str_val[] in struct 
+    strncpy(node->var_name, str_val, sizeof(node->var_name) - 1);
     node->left = NULL;
     node->right = NULL;
     return node;
 }
+
+ASTNode* create_bool_node(bool val) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node) {
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n"); 
+        exit(1);
+    }
+    node->type = NODE_BOOL;
+    node->val = val ? 1 : 0; /* true is 1, false is 0 */
+    node->var_name[0] = '\0';
+    node->left = NULL;
+    node->right = NULL;
+    return node;
+}
+
 void free_ast(ASTNode *node) {
     if (node == NULL) return;
     free_ast(node->left);
@@ -115,7 +134,6 @@ void free_ast(ASTNode *node) {
  * Security & Block Parsing Functions
  * ========================================================================= */
 static bool parse_block(FILE *in, Token *current_tok) {
-    /* current_tok starts at TOKEN_LBRACE '{' */
     int depth = 1;
 
     while (depth > 0) {
@@ -133,7 +151,6 @@ static bool parse_block(FILE *in, Token *current_tok) {
         }
     }
 
-    /* Check token right after closing brace '}' */
     *current_tok = next_token(in);
 
     if (current_tok->type == TOKEN_SEMICOLON) {
@@ -145,7 +162,6 @@ static bool parse_block(FILE *in, Token *current_tok) {
 void parse_program(FILE *in, SecurityContext *sec_ctx) {
     Token tok = next_token(in);
 
-    /* Force @sys permission check at the file header */
     while (tok.type == TOKEN_AT_SYS) {
         if (strcmp(tok.value, "@sys.disk.read") == 0) {
             sec_ctx->permissions |= PERM_DISK_READ;
@@ -165,27 +181,58 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
  * Expression & Statement Recursive Descent Parser
  * ========================================================================= */
 
-/* Primary Expression: Handles Numbers, Strings, and Variable Identifiers */
+/* Primary Expression: Handles Numbers, Strings, Booleans, Identifiers, and Grouping Parentheses */
 static ASTNode* parse_primary(FILE *in, Token *current_tok) {
+    /* 1. Numbers */
     if (current_tok->type == TOKEN_NUMBER) {
         ASTNode *node = create_int_node(atoi(current_tok->value));
         *current_tok = next_token(in); // Consume number
         return node;
     }
     
+    /* 2. String Literals */
     if (current_tok->type == TOKEN_STRING_LIT) {
         ASTNode *node = create_string_node(current_tok->value);
         *current_tok = next_token(in); // Consume string
         return node;
     }
 
+    /* 3. Identifiers & Booleans (true / false) */
     if (current_tok->type == TOKEN_IDENTIFIER) {
-        ASTNode *node = create_string_node(current_tok->value); // or make create_id_node if have NODE_IDENTIFIER
+        if (strcmp(current_tok->value, "true") == 0) {
+            ASTNode *node = create_bool_node(true);
+            *current_tok = next_token(in);
+            return node;
+        } else if (strcmp(current_tok->value, "false") == 0) {
+            ASTNode *node = create_bool_node(false);
+            *current_tok = next_token(in);
+            return node;
+        }
+        
+        ASTNode *node = create_string_node(current_tok->value);
         *current_tok = next_token(in); // Consume identifier
         return node;
     }
 
-    printf("[Kaoru Syntax Error Line %u]: Expected number, string, or identifier, got '%s'\n", 
+    /* 4. Parenthesized Expressions: ( 10 + 20 ) */
+    if (current_tok->type == TOKEN_LPAREN) {
+        *current_tok = next_token(in); // Consume '('
+        
+        ASTNode *node = parse_expression(in, current_tok);
+        if (!node) return NULL;
+
+        if (current_tok->type == TOKEN_RPAREN) {
+            *current_tok = next_token(in); // Consume ')'
+            return node;
+        } else {
+            printf("[Kaoru Syntax Error Line %u]: Expected ')' after expression, got '%s'\n", 
+                   current_tok->line, current_tok->value);
+            free_ast(node);
+            return NULL;
+        }
+    }
+
+    printf("[Kaoru Syntax Error Line %u]: Expected number, string, identifier, bool, or '(', got '%s'\n", 
            current_tok->line, current_tok->value);
     return NULL;
 }
@@ -242,10 +289,13 @@ static ASTNode* parse_expression(FILE *in, Token *current_tok) {
 
 /* Statement Parser: Handles variable declarations and expressions */
 ASTNode* parse_statement(FILE *in, Token *current_tok) {
-    /* Case 1: Variable Declaration (@int or @str <var_name> = <expr>;) */
-    if (current_tok->type == TOKEN_AT_INT || current_tok->type == TOKEN_AT_STR) {
+    /* Case 1: Variable Declaration (@int, @str, or @bool) */
+    if (current_tok->type == TOKEN_AT_INT || 
+        current_tok->type == TOKEN_AT_STR || 
+        current_tok->type == TOKEN_AT_BOOL) {
+        
         TokenType decl_type = current_tok->type;
-        *current_tok = next_token(in); // Consume type token (@int / @str)
+        *current_tok = next_token(in); // Consume type token (@int / @str / @bool)
         
         if (current_tok->type != TOKEN_IDENTIFIER) {
             printf("[Kaoru Syntax Error Line %u]: Expected variable name after type, got '%s'\n", 
@@ -280,7 +330,7 @@ ASTNode* parse_statement(FILE *in, Token *current_tok) {
         return create_var_decl_node(var_name, expr);
     }
 
-    /* Case 2: Standalone Expression (e.g. 10 + 20 * 3;) */
+    /* Case 2: Standalone Expression (e.g. (10 + 20) * 3;) */
     ASTNode *expr = parse_expression(in, current_tok);
     if (expr && current_tok->type == TOKEN_SEMICOLON) {
         *current_tok = next_token(in); // Consume ';'
