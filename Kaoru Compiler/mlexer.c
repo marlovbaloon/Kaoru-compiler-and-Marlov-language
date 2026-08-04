@@ -46,6 +46,7 @@ Token next_token(FILE *file) {
             else if (strcmp(buffer, "@debug") == 0) tok.type = TOKEN_AT_DEBUG;
             else {
                 printf("Kaoru Syntax Error (Line %u): Unknown @ directive %s\n", current_line, buffer);
+                tok.type = TOKEN_EOF;
             }
             return tok;
         }
@@ -103,7 +104,22 @@ Token next_token(FILE *file) {
         if (c == '+') { tok.type = TOKEN_PLUS; strcpy(tok.value, "+"); return tok; }
         if (c == '-') { tok.type = TOKEN_MINUS; strcpy(tok.value, "-"); return tok; }
         if (c == '*') { tok.type = TOKEN_STAR; strcpy(tok.value, "*"); return tok; }
-        if (c == '/') { tok.type = TOKEN_SLASH; strcpy(tok.value, "/"); return tok; }
+
+        /* Single/Double Slash & Line Comments */
+        if (c == '/') {
+            int next_c = fgetc(file);
+            if (next_c == '/') {
+                while ((c = fgetc(file)) != EOF && c != '\n');
+                if (c == '\n') current_line++;
+                continue;
+            } else {
+                ungetc(next_c, file);
+                tok.type = TOKEN_SLASH;
+                strcpy(tok.value, "/");
+                return tok;
+            }
+        }
+
         if (c == '=') {
             int next_c = fgetc(file);
             if (next_c == '=') {
@@ -116,7 +132,20 @@ Token next_token(FILE *file) {
             }
             return tok;
         }
-        if (c == '!') { tok.type = TOKEN_NOT; strcpy(tok.value, "!"); return tok; }
+
+        if (c == '!') {
+            int next_c = fgetc(file);
+            if (next_c == '=') {
+                tok.type = TOKEN_NEQUAL;
+                strcpy(tok.value, "!=");
+            } else {
+                ungetc(next_c, file);
+                tok.type = TOKEN_NOT;
+                strcpy(tok.value, "!");
+            }
+            return tok;
+        }
+
         if (c == '&') {
             int next_c = fgetc(file);
             if (next_c == '&') {
@@ -138,6 +167,7 @@ Token next_token(FILE *file) {
                 ungetc(next_c, file);
             }
         }
+    }
 
     tok.line = current_line;
     tok.type = TOKEN_EOF;
