@@ -5,12 +5,18 @@
 #include <string.h>
 #include <stdbool.h>
 #include "mtypes.h"
-#include "marloru.c"
+
+/* Include Source Modules */
+#include "mcodegen.c"  
+#include "mlexer.c"    
+#include "mparser.c"   
+#include "marloru.c"  
 #define KAORU_VERSION "1.0.0"
 
-extern uint64_t get_hardware_signature();
-extern void parse_program(FILE *in, SecurityContext *sec_ctx);
 
+extern void parse_program(FILE *in, SecurityContext *sec_ctx);
+ASTNode *parse(FILE *in);
+void free_ast(ASTNode *node);
 /* (Help Menu) */
 static void print_usage(const char *prog_name) {
     printf("KAORU COMPILER - MARLOV LANGUAGE (v%s)\n", KAORU_VERSION);
