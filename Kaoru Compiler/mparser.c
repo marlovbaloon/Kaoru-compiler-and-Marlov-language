@@ -16,7 +16,7 @@ static ASTNode* parse_expression(FILE *in, Token *current_tok);
 ASTNode* create_int_node(int val) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) {
-        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n Try to find the root of the problem.\n");
         exit(1);
     }
     node->type = NODE_INT;
@@ -30,7 +30,7 @@ ASTNode* create_int_node(int val) {
 ASTNode* create_add_node(ASTNode* left, ASTNode* right) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) {
-        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n Try to find the root of the problem.\n");
         exit(1);
     }
     node->type = NODE_ADD;
@@ -44,7 +44,7 @@ ASTNode* create_add_node(ASTNode* left, ASTNode* right) {
 ASTNode* create_sub_node(ASTNode* left, ASTNode* right) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) {
-        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n Try to find the root of the problem.\n");
         exit(1);
     }
     node->type = NODE_SUB;
@@ -58,7 +58,7 @@ ASTNode* create_sub_node(ASTNode* left, ASTNode* right) {
 ASTNode* create_mul_node(ASTNode* left, ASTNode* right) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) {
-        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n Try to find the root of the problem.\n");
         exit(1);
     }
     node->type = NODE_MUL;
@@ -72,7 +72,7 @@ ASTNode* create_mul_node(ASTNode* left, ASTNode* right) {
 ASTNode* create_div_node(ASTNode* left, ASTNode* right) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) {
-        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n Try to find the root of the problem.\n");
         exit(1);
     }
     node->type = NODE_DIV;
@@ -86,7 +86,7 @@ ASTNode* create_div_node(ASTNode* left, ASTNode* right) {
 ASTNode* create_var_decl_node(const char* name, ASTNode* expr) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) {
-        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n Try to find the root of the problem.\n");
         exit(1);
     }
     node->type = NODE_VAR_DECL;
@@ -112,7 +112,7 @@ ASTNode* create_string_node(const char* str_val) {
 ASTNode* create_bool_node(bool val) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) {
-        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n"); 
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n Try to find the root of the problem.\n"); 
         exit(1);
     }
     node->type = NODE_BOOL;

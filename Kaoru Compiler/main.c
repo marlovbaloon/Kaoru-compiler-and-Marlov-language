@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
             if (i + 1 < argc) {
                 output_file = argv[++i];
             } else {
-                printf("[Kaoru CLI Error]: Missing filename after -o flag.\n");
+                printf("[Kaoru CLI Error]: I can not found you file.\n Missing filename after -o flag.\n");
                 return 1;
             }
         } else if (strcmp(argv[i], "--dump-ast") == 0) {
@@ -63,7 +63,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (!source_file) {
-        printf("[Kaoru CLI Error]: No input source file provided.\n");
+        printf("[Kaoru CLI Error]: Go get the file for me, babe.\n No input source file provided.\n");
         return 1;
     }
 
