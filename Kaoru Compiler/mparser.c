@@ -122,8 +122,23 @@ ASTNode* create_bool_node(bool val) {
     node->right = NULL;
     return node;
 }
-
+ASTNode* create_print_node(ASTNode *expr) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node){
+        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n where my printer?.\n");
+        exit(1);
+    }
+    node->type = PRINT_NODE;
+    node->left = expr;
+    node->right = NULL;
+    return node;
+}
 void free_ast(ASTNode *node) {
+    if (node->type == PRINT_NODE) {
+        free_ast(node->left); 
+        free(node);
+        return;
+    }
     if (node == NULL) return;
     free_ast(node->left);
     free_ast(node->right);
@@ -289,6 +304,17 @@ static ASTNode* parse_expression(FILE *in, Token *current_tok) {
 
 /* Statement Parser: Handles variable declarations and expressions */
 ASTNode* parse_statement(FILE *in, Token *current_tok) {
+    if (current_tok->type == TOKEN_AT_PRINT) {
+        *current_tok = next_token(in); 
+        ASTNode *expr = parse_expression(in, current_tok);
+        if (current_tok->type == TOKEN_SEMICOLON) {
+            *current_tok = next_token(in);
+        } else {
+            printf("[Kaoru Syntax Error Line %u]: Expected ';' after @print statement\n", current_tok->line);
+        }
+        
+        return create_print_node(expr);
+    }
     /* Case 1: Variable Declaration (@int, @str, or @bool) */
     if (current_tok->type == TOKEN_AT_INT || 
         current_tok->type == TOKEN_AT_STR || 
@@ -335,6 +361,7 @@ ASTNode* parse_statement(FILE *in, Token *current_tok) {
     if (expr && current_tok->type == TOKEN_SEMICOLON) {
         *current_tok = next_token(in); // Consume ';'
     }
+    
     return expr;
 }
 

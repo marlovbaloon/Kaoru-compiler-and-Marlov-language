@@ -24,13 +24,14 @@ typedef enum {
 typedef enum  { 
     NODE_INT, NODE_ADD,NODE_VAR_DECL, 
     NODE_MUL, NODE_DIV, NODE_SUB,
-    NODE_STR, NODE_BOOL,
+    NODE_STR, NODE_BOOL,PRINT_NODE,
 
 }NodeType;
 
 typedef struct ASTNode{
     NodeType type;
     int val;
+    char str_val[67];
     char var_name[32];
     struct ASTNode *left;
     struct ASTNode *right;
