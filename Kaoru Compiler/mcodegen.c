@@ -66,23 +66,23 @@ uint64_t get_hardware_signature() {
 /* =========================================================================
  * Security Gatekeeper Assembly Output
  * ========================================================================= */
-void generate_security_header(FILE *out, SecurityContext *ctx) {
-    fprintf(out, "; --- MARLOV HARDWARE-BOUND SECURITY GATEKEEPER ---\n");
-
-#if defined(__x86_64__) || defined(_M_X64)
-    fprintf(out, "global _start\n");
-    fprintf(out, "_start:\n");
-    
-    if (ctx && (ctx->permissions & PERM_DISK_READ)) {
-        fprintf(out, "    mov rax, 1\n");
-        fprintf(out, "    cpuid\n");
-        fprintf(out, "    xor rbx, rcx\n");
-        fprintf(out, "    cmp rbx, 0x%llX ; Verification Key\n", (unsigned long long)ctx->hardware_hash);
-        fprintf(out, "    jne self_destruct\n");
-    } else {
-        fprintf(out, "    ; Security Violation: Missing @sys.disk.read\n");
-        fprintf(out, "    jmp self_destruct\n");
-    }
+void generate_runtime_header(FILE *out, SecurityContext *sec_ctx) {
+    fprintf(out, "// --- KAORU RUNTIME SECURITY GUARD ---\n");
+    fprintf(out, "#include <stdio.h>\n");
+    fprintf(out, "#include <stdlib.h>\n");
+    fprintf(out, "#include <stdbool.h>\n\n");
+    fprintf(out, "static const unsigned long long AUTHORIZED_HARDWARE_HASH = 0x%LXULL;\n", 
+            (unsigned long long)sec_ctx->hardware_hash);
+    fprintf(out, "static const bool HAS_DISK_READ_PERM = %s;\n\n", 
+            (sec_ctx->permissions & PERM_DISK_READ) ? "true" : "false");
+    fprintf(out, "void verify_hardware_and_permissions() {\n");
+    fprintf(out, "    unsigned long long current_cpuid = get_hardware_signature();\n");
+    fprintf(out, "    if (current_cpuid != AUTHORIZED_HARDWARE_HASH) {\n");
+    fprintf(out, "        printf(\"[Marlov Runtime Error]: Hardware signature mismatch! Unauthorized device.\\n\");\n");
+    fprintf(out, "        exit(137);\n");
+    fprintf(out, "    }\n");
+    fprintf(out, "}\n\n");
+}
     
     fprintf(out, "\nself_destruct:\n");
     fprintf(out, "    ud2 ; x86 Undefined Instruction\n");
