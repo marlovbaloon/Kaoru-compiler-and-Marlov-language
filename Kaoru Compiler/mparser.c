@@ -183,13 +183,8 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
         }
         tok = next_token(in);
     }
-
-    if (!(sec_ctx->permissions & PERM_DISK_READ)) {
-        printf("[Kaoru Error]: Security Violation! Missing @sys.disk.read at file header.\n");
-        exit(1);
-    }
-
-    printf("[Kaoru Compiler]: Permissions Validated. Hardware Hash Injected.\n");
+    sec_ctx->hardware_hash = get_hardware_signature();
+    printf("[Kaoru Compiler]: Security context initialized. Owner Hash: 0x%LX\n", (unsigned long long)sec_ctx->hardware_hash);   
 } 
 
 /* =========================================================================
