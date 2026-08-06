@@ -258,7 +258,7 @@ static ASTNode* parse_multiplicative(FILE *in, Token *current_tok) {
     if (!left) return NULL;
 
     while (current_tok->type == TOKEN_STAR || current_tok->type == TOKEN_SLASH) {
-        TokenType op = current_tok->type;
+        MTokenType op = current_tok->type;
         *current_tok = next_token(in); // Consume '*' or '/'
 
         ASTNode *right = parse_primary(in, current_tok);
@@ -283,7 +283,7 @@ static ASTNode* parse_expression(FILE *in, Token *current_tok) {
     if (!left) return NULL;
 
     while (current_tok->type == TOKEN_PLUS || current_tok->type == TOKEN_MINUS) {
-        TokenType op = current_tok->type;
+        MTokenType op = current_tok->type;
         *current_tok = next_token(in); // Consume '+' or '-'
 
         ASTNode *right = parse_multiplicative(in, current_tok);
@@ -320,7 +320,7 @@ ASTNode* parse_statement(FILE *in, Token *current_tok) {
         current_tok->type == TOKEN_AT_STR || 
         current_tok->type == TOKEN_AT_BOOL) {
         
-        TokenType decl_type = current_tok->type;
+        MTokenType decl_type = current_tok->type;
         *current_tok = next_token(in); // Consume type token (@int / @str / @bool)
         
         if (current_tok->type != TOKEN_IDENTIFIER) {
