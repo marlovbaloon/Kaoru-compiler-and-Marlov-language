@@ -1,5 +1,4 @@
 //main.c
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,13 +9,14 @@
 #include "mcodegen.c"  
 #include "mlexer.c"    
 #include "mparser.c"   
-#include "marloru.c"  
-#define KAORU_VERSION "1.0.0"
+#include "marloru.c"  /* Included Marloru TUI Editor */
 
+#define KAORU_VERSION "1.0.0"
 
 extern void parse_program(FILE *in, SecurityContext *sec_ctx);
 ASTNode *parse(FILE *in);
 void free_ast(ASTNode *node);
+
 /* (Help Menu) */
 static void print_usage(const char *prog_name) {
     printf("KAORU COMPILER - MARLOV LANGUAGE (v%s)\n", KAORU_VERSION);
@@ -28,58 +28,11 @@ static void print_usage(const char *prog_name) {
     printf("  -v, --version  Display compiler version information\n");
     printf("  -h, --help     Display this help message\n");
 }
-static void run_interactive_cli() {
-	char input[512];
-	printf("==================================================\n");
-	printf("   KAORU COMPILER INTERACTIVE CLI (v%s)\n", KAORU_VERSION);
-	printf("   Type 'exit' or 'quit' to exit.\n");
-	printf("   Type 'tui' to open Marloru Editor.\n");
-	printf("   Type 'help' for available commands.\n");
-	printf("==================================================\n\n");
-	
-	while (1) {
-		printf("kaoru> ");
-		fflush(stdout);
-		
-		if (!fgets(input, sizeof(input), stdin)) break;
-		
-		// ลบ newline สิ้นสุดข้อความ
-		input[strcspn(input, "\r\n")] = 0;
-		
-		if (strlen(input) == 0) continue;
-		
-		if (strcmp(input, "exit") == 0 || strcmp(input, "quit") == 0) {
-			printf("[Kaoru]: Exiting Interactive CLI...\n");
-			break;
-		} else if (strcmp(input, "help") == 0) {
-			print_usage("kaoru");
-		} else if (strcmp(input, "tui") == 0) {
-			run_marloru_editor();
-		} else {
-			printf("[Kaoru CLI]: Processing command or file '%s'...\n", input);
-			FILE *f = fopen(input, "r");
-			if (f) {
-				SecurityContext sec_ctx;
-				sec_ctx.permissions = PERM_NONE;
-				sec_ctx.hardware_hash = get_hardware_signature();
-				
-				parse_program(f, &sec_ctx);
-				ASTNode *root = parse(f);
-				if (root) free_ast(root);
-				fclose(f);
-				printf("[Kaoru CLI]: Parsing finished successfully.\n");
-			} else {
-				printf("[Kaoru CLI Error]: Unknown command or file '%s' not found.\n", input);
-			}
-		}
-		printf("\n");
-	}
-}
+
 int main(int argc, char *argv[]) {
-    
     if (argc < 2) {
-        run_interactive_cli()();
-        return 0;
+        run_marloru_editor();
+        return 1;
     }
 
     const char *source_file = NULL;
@@ -100,7 +53,7 @@ int main(int argc, char *argv[]) {
             if (i + 1 < argc) {
                 output_file = argv[++i];
             } else {
-                printf("[Kaoru CLI Error]: I can not found you file.\n Missing filename after -o flag.\n");
+                printf("[Kaoru CLI Error]: Missing filename after -o flag.\n");
                 return 1;
             }
         } else if (strcmp(argv[i], "--dump-ast") == 0) {
@@ -115,7 +68,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (!source_file) {
-        printf("[Kaoru CLI Error]: Go get the file for me, babe.\n No input source file provided.\n");
+        printf("[Kaoru CLI Error]: No input source file provided.\n");
         return 1;
     }
 
