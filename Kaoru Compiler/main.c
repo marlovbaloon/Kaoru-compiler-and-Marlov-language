@@ -31,7 +31,7 @@ static void print_usage(const char *prog_name) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        run_marloru_editor();
+        run_interactive_cli();
         return 1;
     }
 
