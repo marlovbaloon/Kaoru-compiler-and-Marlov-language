@@ -18,13 +18,26 @@ typedef enum {
     TOKEN_STRING_LIT, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_LPAREN,
     TOKEN_RPAREN, TOKEN_SEMICOLON, TOKEN_ASSIGN, TOKEN_EQUAL,
     TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH,
-    TOKEN_AND, TOKEN_OR, TOKEN_NOT, TOKEN_IF, TOKEN_ELSE, TOKEN_WHILE, TOKEN_RETURN
+    TOKEN_AND, TOKEN_OR, TOKEN_NOT, TOKEN_IF, TOKEN_ELSE, TOKEN_WHILE, TOKEN_RETURN,
+    TOKEN_EQ,       /* == */
+    TOKEN_NEQ,      /* != */
+    TOKEN_LT,       /* < */
+    TOKEN_GT,       /* > */
+    TOKEN_LTE,      /* <= */
+    TOKEN_GTE,      /* >= */
 } MTokenType;
 
 typedef enum  { 
     NODE_INT, NODE_ADD,NODE_VAR_DECL, 
     NODE_MUL, NODE_DIV, NODE_SUB,
-    NODE_STR, NODE_BOOL,PRINT_NODE,
+    NODE_STR, NODE_BOOL,PRINT_NODE, NODE_IF,
+    NODE_BLOCK,
+    NODE_EQ,       /* == */
+    NODE_NEQ,      /* != */
+    NODE_LT,       /* < */
+    NODE_GT,       /* > */
+    NODE_LTE,      /* <= */
+    NODE_GTE       /* >= */
 
 }NodeType;
 
@@ -35,6 +48,11 @@ typedef struct ASTNode{
     char var_name[32];
     struct ASTNode *left;
     struct ASTNode *right;
+    struct ASTNode *cond; //conditon if
+    struct ASTNode *then_branch; //if true
+    struct ASTNode *else_branch; //if false (else, else if)
+    struct ASTNode **statement; // node block
+    int stm_count; 
 } ASTNode;
 
 typedef struct {
