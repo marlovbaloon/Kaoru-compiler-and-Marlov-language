@@ -5,7 +5,10 @@ A programming language built completely from scratch for my vocational diploma f
 # Marlov Language Specification
 
 ### *"Marlov Language For Everyone"*
+## 📱 Development Note
+This entire compiler and language specification were built and experimented directly on a mobile phone due to hardware constraints. 
 
+If you find this project interesting or would like to support the development of Marlov (especially helping the developer acquire a proper laptop to build the full toolchain and GDB integration), feel free to reach out or sponsor this repository!
 ---
 
 ## 1. Introduction & Architecture
