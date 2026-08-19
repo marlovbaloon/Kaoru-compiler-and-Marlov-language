@@ -28,9 +28,9 @@ typedef enum {
 } MTokenType;
 
 typedef enum  { 
-    NODE_INT, NODE_ADD,NODE_VAR_DECL, 
+    NODE_INT, NODE_ADD, NODE_VAR_DECL, 
     NODE_MUL, NODE_DIV, NODE_SUB,
-    NODE_STR, NODE_BOOL,PRINT_NODE, NODE_IF,
+    NODE_STR, NODE_BOOL, PRINT_NODE, NODE_IF,
     NODE_BLOCK,
     NODE_EQ,       /* == */
     NODE_NEQ,      /* != */
@@ -38,32 +38,31 @@ typedef enum  {
     NODE_GT,       /* > */
     NODE_LTE,      /* <= */
     NODE_GTE       /* >= */
+} NodeType;
 
-}NodeType;
-
-typedef struct ASTNode{
+typedef struct ASTNode {
     NodeType type;
     int val;
     char str_val[67];
     char var_name[32];
     struct ASTNode *left;
     struct ASTNode *right;
-    struct ASTNode *cond; //conditon if
-    struct ASTNode *then_branch; //if true
-    struct ASTNode *else_branch; //if false (else, else if)
-    struct ASTNode **statement; // node block
-    int stm_count; 
+    struct ASTNode *cond;         // condition if
+    struct ASTNode *then_branch;   // if true
+    struct ASTNode *else_branch;   // if false (else, else if)
+    struct ASTNode **statements;  
+    int stmt_count;              
 } ASTNode;
 
 typedef struct {
-    TokenType type;
+    MTokenType type;              
     char value[64];
     uint32_t line;
 } Token;
 
 typedef struct {
-    uint8_t permissions; /* Bitmask for permission require from program */
-    uint64_t hardware_hash; /* Hash made from Motherboard/CPU */
+    uint8_t permissions;  
+    uint64_t hardware_hash; 
 } SecurityContext;
 
 #endif

@@ -153,3 +153,9 @@ void generate_print_asm(FILE *out, ASTNode *node) {
 #endif
     }
 }
+/* =========================================================================
+ * Generate Assembly for conditional if statements
+ * ========================================================================= */
+void generate_if_asm(FILE *out, ASTNode *node){
+
+}

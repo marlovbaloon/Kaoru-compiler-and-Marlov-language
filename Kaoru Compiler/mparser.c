@@ -177,10 +177,12 @@ void free_ast(ASTNode *node) {
         return;
     }
     if (node->type == NODE_BLOCK) {
-        for (int i = 0; i < node->stm_count; i++) {
-            free_ast(node->statements[1]);
-        }
-    
+        for (int i = 0; i < node->stmt_count; i++) {
+        free_ast(node->statements[i]);
+    }
+    free(node->statements); 
+    free(node);
+    return;}
     }
     if (node->type == PRINT_NODE) {
         free_ast(node->left); 
@@ -344,7 +346,7 @@ static ASTNode* parse_expression(FILE *in, Token *current_tok) {
 
     return left;
 }
-static ASTNode* pares_relational(FILE *in, Token *current_tok) {
+static ASTNode* parse_relational(FILE *in, Token *current_tok) {
     ASTNode *left = parse_expression(in, current_tok);
     if (!left) return NULL:
     while (current_tok->type == TOKEN_EQ || current_tok->type == TOKEN_NEQ || 
@@ -398,7 +400,7 @@ static ASTNode* parse_statement_or_block(FILE *in, Token *current_tok) {
         } else {
             printf("[Kaoru Syntax Error Line %u]: Expected '}' at end of block\n", current_tok->line);
         }
-        return create_block_node(stmt,count);
+        return create_block_node(stmts,count);
 
     }
     return parse_statement(in, current_tok);
@@ -472,7 +474,7 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
         current_tok->type == TOKEN_AT_STR || 
         current_tok->type == TOKEN_AT_BOOL) {
         
-        TokenType decl_type = current_tok->type;
+        MTokenType decl_type = current_tok->type;
         *current_tok = next_token(in); 
         
         if (current_tok->type != TOKEN_IDENTIFIER) {
