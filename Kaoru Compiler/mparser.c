@@ -361,7 +361,7 @@ static ASTNode* pares_relational(FILE *in, Token *current_tok) {
             switch (op) {
                 case TOKEN_EQ: node_type = NODE_EQ; break;
                 case TOKEN_NEQ: node_type = NODE_NEQ; break;
-                case Token_LT: node_type = NODE_LT; break;
+                case TOKEN_LT: node_type = NODE_LT; break;
                 case TOKEN_GT: node_type = NODE_GT; break;
                 case TOKEN_LTE: node_type = NODE_LTE; break;
                 case TOKEN_GTE: node_type = NODE_GTE; break;
@@ -382,11 +382,15 @@ static ASTNode* parse_statement_or_block(FILE *in, Token *current_tok) {
         while (current_tok->type != TOKEN_RBRACE && current_tok->type !+ TOKEN_EOF){
             ASTNode *stmt = parse_statement(in, current_tok);
             if (stmt) {
-                if (count >= capacity) {
+                if (count >= capacity){
                     capacity = (capacity == 0) ? 4 : capacity * 2;
-                    stmt = realloc(stmt, sizeof(ASTNode*) * capacity);
+                    ASTNode **new_stmts = realloc(stmts, sizeof(ASTNode*) * capacity);
+                    if (!new_stmts) { 
+                        free(stmts); exit(1); 
+                    }
+                    stmts = new_stmts;
                 }
-                stmt[count++] = stmt;
+                stmts[count++] = stmt;
             }
         }
         if (current_tok->type == TOKEN_RBRACE){
@@ -413,7 +417,6 @@ static ASTNode* parse_if_statement(FILE *in, Token *current_tok) {
     /* 2. Parse Condition Expression */
     ASTNode *cond = parse_relational(in, current_tok);
     if (!cond) return NULL;
-
     /* 3. Expect ')' */
     if (current_tok->type != TOKEN_RPAREN) {
         printf("[Kaoru Syntax Error Line %u]: Expected ')' after if condition\n", current_tok->line);
