@@ -83,17 +83,6 @@ To prove that the **Kaoru Compiler** delivers **Deterministic Stack Reclamation*
 ---
 
 ## 4. Post-Evaluation Decision Tree & Continuation Pipeline (Paper 2 Trajectory)
-[ Paper 1: Core AST Reclamation ]
-                                   │
-            ┌──────────────────────┴──────────────────────┐
-            ▼                                             ▼
- [ IF: Positive Result ]                      [ ELSE: Trade-off Result ]
-(Deterministic & High-Efficiency)              (Register Spilling / Instruction Bloat)
-            │                                             │
-            ▼                                             ▼
-[ Paper 2: Branch A ]                         [ Paper 2: Branch B ]
-Compile-Time Bounds & Safety                 Heuristic Scope Coalescing
----
 ### BRANCH A (IF POSITIVE RESULT): Formal Bounds & Verification
 
 > **Scenario:** Kaoru proves to achieve equal or superior instruction efficiency to `GCC -O2` while maintaining $100\%$ deterministic stack bounds and eliminating C++ RAII landing-pad overhead.
