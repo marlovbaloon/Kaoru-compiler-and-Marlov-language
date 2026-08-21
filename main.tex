@@ -1,0 +1,159 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows, positioning}
+
+% Code Listing Configuration
+\lstdefinestyle{kaorustyle}{
+    basicstyle=\ttfamily\scriptsize,
+    breaklines=true,
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{orange},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    frame=single,
+    tabsize=2,
+    captionpos=b
+}
+\lstset{style=kaorustyle}
+
+\begin{document}
+
+\title{Explicit AST-Driven Stack Reclamation for Bare-Metal ARM Cortex-M Architecture}
+
+\author{\IEEEauthorblockN{Arsira ``Marlov'' Langphang}
+\IEEEauthorblockA{\textit{Department of Computer Engineering} \\
+Email: marlovbaloon@gmail.com}
+}
+
+\maketitle
+
+\begin{abstract}
+Bare-metal embedded systems executing on microcontrollers like the ARM Cortex-M architecture operate under extremely stringent SRAM constraints, where unpredicted stack growth poses severe risks of memory corruption and system instability. Traditional compilers rely on back-end static analysis and control-flow graph (CFG) heuristics to infer local variable lifecycles, or enforce runtime cleanup routines such as C++ RAII landing pads. This paper proposes an explicit, Abstract Syntax Tree (AST)-driven stack reclamation mechanism implemented within the Kaoru Compiler. By establishing front-end scope syntax as the primary authority for memory deallocation intent, Kaoru bypasses non-deterministic back-end optimizations and directly emits ARM Thumb-2 instructions (\texttt{ADD SP, SP, \#N}) upon scope termination. We propose a methodology to evaluate this approach against standard GCC optimization baselines (\texttt{-O0}, \texttt{-O2}) and C++ RAII constructs on an emulated Cortex-M platform. We hypothesize that explicit AST-driven reclamation can achieve deterministic memory bounds, eliminate landing-pad runtime overhead, and reduce peak stack depth while preserving execution predictability.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Compilers, Abstract Syntax Tree, Stack Reclamation, Memory Determinism, Embedded Systems, ARM Cortex-M, Bare-Metal.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Microcontrollers operating in safety-critical embedded environments, such as the ARM Cortex-M architecture, typically feature highly asymmetric memory hierarchies, offering minimal static random-access memory (SRAM) relative to read-only flash storage. In such environments, dynamic memory allocation (\texttt{malloc}/\texttt{free}) is strongly discouraged or outright prohibited due to non-deterministic execution latency and heap fragmentation. Consequently, local data structures are heavily reliant on automatic stack allocation. While modern industrial compilers like LLVM and GCC excel at general-purpose computing, their heavy reliance on non-deterministic back-end CFG inference is ill-suited for ultra-low-power, safety-critical bare-metal environments (e.g., medical implantables, automotive ECUs). In a pacemaker, dynamic uncertainty is an unacceptable liability. Kaoru demonstrates that shifting memory reclamation intent directly to front-end AST scope triggers provides a lean, deterministic, and zero-runtime-overhead alternative specifically tailored for SRAM-constrained ARM Cortex-M architectures.                                                                                              
+
+\subsection{Background and Embedded Memory Constraints}
+On bare-metal ARM Cortex-M microcontrollers, the Main Stack Pointer (MSP) and Process Stack Pointer (PSP) manage local activation frames. Because these architectures lack Virtual Memory Management (MMU) hardware, a stack overflow directly overwrites peripheral registers or static data segments, causing silent data corruption, hard faults, or catastrophic system failure. Maintaining absolute determinism in the worst-case stack depth ($\text{Stack}_{\text{Peak}}$) is therefore a paramount requirement for real-time safety standards (e.g., ISO 26262 and DO-178C).
+
+\subsection{Limitations of Traditional Compiler Paradigms}
+Modern C/C++ industrial compilers (such as GCC and LLVM) separate the front-end language parser from back-end code generation through intermediate representations (IR). Under standard compilation passes:
+\begin{enumerate}
+    \item \textbf{Unoptimized Front-End Behaviour (\texttt{GCC -O0}):} The compiler emits stack allocation instructions upon function entry and retains all declared variables within the stack frame until function return, regardless of their actual lexical scope boundary. This results in inflated stack frames and high memory footprints.
+    \item \textbf{Inferred Back-End Optimizations (\texttt{GCC -O2}):} The middle/back-end optimizes stack slot usage using Control-Flow Graph (CFG) analysis and stack slot coloring algorithms. However, this lifecycle inference is non-deterministic with respect to front-end source semantics. Slight modifications in code structure can dramatically alter the generated assembly frame layout.
+    \item \textbf{Runtime Cleanup Abstractions (C++ RAII):} C++ Resource Acquisition Is Initialization (RAII) ties variable cleanup to scope exit via destructors. However, standard implementation models introduce landing pads, exception-handling tables, and branch overheads that bloat code size and introduce non-deterministic instruction execution times.
+\end{enumerate}
+
+\subsection{The Kaoru Paradigm: Shift-Left Memory Intent}
+To overcome the unpredictability of back-end lifecycle inference, we present the design of the \textbf{Kaoru Compiler}. Kaoru shifts memory management intent entirely to the compiler front-end. By utilizing explicit syntax constructs (e.g., \texttt{\{ @int x = 10; \};}), the Abstract Syntax Tree (AST) serves as the direct, authoritative trigger for stack reclamation. Rather than delegating lifetime analysis to dynamic back-end passes, Kaoru's front-end explicitly instructs the emitter to emit immediate stack adjustment instructions (\texttt{ADD SP, SP, \#N}) at the precise point of lexical scope exit.
+
+\subsection{Contributions}
+This paper outlines the following core contributions and proposed evaluations:
+\begin{itemize}
+    \item A formalization of explicit AST-driven stack reclamation for resource-constrained architectures.
+    \item The architectural design of the Kaoru Compiler pipeline, demonstrating direct code generation from explicit AST scope triggers to ARM Thumb-2 assembly.
+    \item A comparative benchmarking methodology utilizing QEMU, GDB-based \textbf{Stack Painting} (\texttt{0xDEADBEEF}), and instruction cycle profiling to evaluate Kaoru against standard C/C++ compilation baselines.
+\end{itemize}
+
+\section{Related Work}
+Memory safety and stack optimization have been widely studied across desktop and system-level compilers, but bare-metal embedded constraints present unique challenges.
+
+\subsection{RAII and Scope-Based Management in C++}
+C++ leverages RAII to manage resource lifetimes automatically. When an object leaves its lexical scope, the compiler guarantees destructor invocation. However, on embedded targets, RAII generates hidden control-flow branches and landing pads to handle potential unwinding scenarios. Studies on embedded C++ show that destructor landing pads increase code size and execution cycle variance, making it suboptimal for hard real-time systems.
+
+\subsection{Rust Lifetimes and Borrow Checking}
+The Rust programming language provides strong compile-time memory safety guarantees through its borrow checker and Mid-level Intermediate Representation (MIR). Rust tracks variable ownership and automatically inserts drop flags and drop glues at scope exits. While Rust achieves zero-cost abstractions on high-performance desktop systems, its complex front-end lowered representations can lead to significant code bloat on ARM Cortex-M targets unless complex LTO (Link-Time Optimization) passes are applied.
+
+\subsection{Back-End Stack Slot Coloring}
+Back-end compiler optimizations, such as GCC's stack slot coloring, analyze variable live ranges using liveness analysis on CFGs. Variables with non-overlapping live ranges share the same stack offset. While effective at reducing total stack size, this process is opaque to the software engineer and sensitive to compiler optimization flags, breaking structural determinism between source code and generated binary.
+
+\begin{figure*}[t] 
+\centering
+\begin{tikzpicture}[node distance=0.8cm, auto, >=latex']
+    % Styles
+    \tikzstyle{block} = [draw, fill=blue!10, rectangle, minimum height=0.8cm, minimum width=2.5cm, rounded corners, align=center, font=\scriptsize]
+    \tikzstyle{astblock} = [draw, fill=orange!15, rectangle, minimum height=0.8cm, minimum width=2.5cm, rounded corners, align=center, font=\scriptsize]
+    \tikzstyle{arrow} = [thick,->,>=stealth]
+
+    % Nodes
+    \node [block] (source) {Source Code\\{\texttt{\{ @int x; \};}}};
+    \node [astblock, right=0.8cm of source] (parser) {Lexer \& Parser\\(AST Construction)};
+    \node [astblock, right=0.8cm of parser] (ast) {Scope Trigger\\Node Detection};
+    \node [block, right=0.8cm of ast] (emitter) {Thumb-2 Emitter\\{\texttt{ADD SP, SP, \#N}}};
+
+    % Paths
+    \draw [arrow] (source) -- (parser);
+    \draw [arrow] (parser) -- (ast);
+    \draw [arrow] (ast) -- (emitter);
+\end{tikzpicture}
+\caption{The Kaoru Compiler Front-End Driven Reclamation Pipeline.}
+\label{fig:pipeline}
+\end{figure*}
+
+\section{AST-Driven Reclamation Mechanism}
+In this section, we present the structural semantics and proposed compilation pipeline of the Kaoru Compiler.
+
+\subsection{Compiler Architecture Pipeline}
+Unlike traditional multi-pass compilers where lifetime analysis occurs late in the optimization pipeline, Kaoru establishes a direct mapping between syntactic scope blocks and target machine stack pointers. As illustrated in Fig.~\ref{fig:pipeline}, the pipeline consists of three streamlined stages:
+\begin{enumerate}
+    \item \textbf{Lexer \& AST Parser:} Synthesizes explicit scope markers (\texttt{\{\dots\}}) into specialized \texttt{AST\_SCOPE\_BLOCK} nodes during token processing.
+    \item \textbf{Scope Trigger Detection:} Traverses the AST and assigns byte offsets for locally declared variables within the scope frame.
+    \item \textbf{ARM Thumb-2 Direct Emitter:} Translates scope exit nodes directly into stack reclamation instructions without invoking intermediate CFG optimization passes.
+\end{enumerate}
+
+\subsection{Syntax Semantics and Code Mapping}
+In Kaoru, explicit scoping syntax explicitly dictates the exact lifecycle of local storage. Consider the code construct shown in Listing~\ref{lst:kaoru_code}.
+
+\begin{lstlisting}[language=C, caption={Explicit Scope Declaration in Kaoru Syntax.}, label={lst:kaoru_code}]
+// Outer Function Scope
+void process_data() {
+    // Inner Explicit Scope
+    {
+        @int x = 10;
+        @int y = 20;
+        // Business Logic
+    }; // AST Trigger Point: Immediate Reclamation
+}
+\end{lstlisting}
+
+Upon parsing the inner scope opening brace \texttt{\{}, the compiler calculates the required frame allocation size ($N = \text{sizeof}(x) + \text{sizeof}(y) = 8\text{ bytes}$) and emits instruction (1):
+\begin{equation}
+\text{\texttt{SUB SP, SP, \#8}}
+\end{equation}
+When the parser encounters the scope termination symbol \texttt{\};}, the \texttt{AST\_SCOPE\_BLOCK} node forces the code generator to immediately emit the corresponding stack reclamation instruction (2):
+\begin{equation}
+\text{\texttt{ADD SP, SP, \#8}}
+\end{equation}
+This direct mapping is designed to ensure that the stack space allocated for variables $x$ and $y$ is reclaimed immediately at the lexical boundary, rather than remaining allocated for the entire duration of \texttt{process\_data()}.
+
+\subsection{Constraint-Preserving Middle-End Integration}
+A key philosophical distinction of the Kaoru Compiler is the relationship between the front-end and the middle-end optimizer. 
+
+Unlike traditional compiler architectures where the middle-end infers memory lifecycles via control-flow graphs, our architecture establishes the front-end AST as the authoritative intent-giver for stack reclamation. The middle-end functions strictly as a constraint-preserving optimizer—improving execution velocity while contractually preserving the explicit structural boundaries defined by the AST. If a middle-end optimization pass (such as loop unrolling or instruction rescheduling) attempts to reorder instructions across an \texttt{AST\_SCOPE\_BLOCK} boundary, the transformation is rejected unless it can mathematically prove that the stack depth invariant $\text{SP}_{\text{exit}} == \text{SP}_{\text{entry}}$ is strictly preserved.
+
+\section*{Acknowledgment}
+The author would like to thank the open-source compiler engineering community and the developers of QEMU and GNU Toolchains for providing robust open research tooling.
+
+\begin{thebibliography}{00}
+\bibitem{cortex_m} ARM Limited, ``ARMv7-M Architecture Reference Manual,'' Document No. ARM DDI 0403E.b, 2018.
+\bibitem{iso26262} International Organization for Standardization, ``Road vehicles --- Functional safety --- Part 6: Product development at the software level,'' ISO Standard 26262-6:2018, 2018.
+\bibitem{raii_overhead} B. Stroustrup, \textit{The C++ Programming Language}, 4th ed. Addison-Wesley Professional, 2013.
+\bibitem{gcc_stack} R. Stallman and the GCC Developer Community, ``Using the GNU Compiler Collection (GCC),'' Free Software Foundation, 2022.
+\bibitem{rust_borrow} N. Matsakis and F. Klock, ``The Rust Language,'' \textit{ACM Queue}, vol. 12, no. 11, pp. 20--31, Nov. 2014.
+\bibitem{qemu} F. Bellard, ``QEMU, a Fast and Portable Dynamic Translator,'' in \textit{Proc. USENIX Annual Technical Conference (ATC)}, 2005, pp. 41--46.
+\end{thebibliography}
+
+\end{document}
