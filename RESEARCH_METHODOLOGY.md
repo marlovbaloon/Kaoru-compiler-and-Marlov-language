@@ -80,3 +80,52 @@ To prove that the **Kaoru Compiler** delivers **Deterministic Stack Reclamation*
 1. Develop GDB Python scripts for **Stack Painting** (`0xDEADBEEF`) and automated `SP` register tracking in Debian.
 2. Compile and generate ARM Thumb-2 assembly directly from the Kaoru Compiler front-end emitter.
 3. Collect quantitative data (Bytes and Instruction Cycles) to contrast front-end direct reclamation against back-end inferred optimization, generating dataset visualizations for LaTeX integration.
+---
+
+## 4. Post-Evaluation Decision Tree & Continuation Pipeline (Paper 2 Trajectory)
+[ Paper 1: Core AST Reclamation ]
+                                   │
+            ┌──────────────────────┴──────────────────────┐
+            ▼                                             ▼
+ [ IF: Positive Result ]                      [ ELSE: Trade-off Result ]
+(Deterministic & High-Efficiency)              (Register Spilling / Instruction Bloat)
+            │                                             │
+            ▼                                             ▼
+[ Paper 2: Branch A ]                         [ Paper 2: Branch B ]
+Compile-Time Bounds & Safety                 Heuristic Scope Coalescing
+---
+### BRANCH A (IF POSITIVE RESULT): Formal Bounds & Verification
+
+> **Scenario:** Kaoru proves to achieve equal or superior instruction efficiency to `GCC -O2` while maintaining $100\%$ deterministic stack bounds and eliminating C++ RAII landing-pad overhead.
+
+#### Paper 2 Title
+**Compile-Time Upper-Bound Verification for Safety-Critical RTOS via Front-End AST Semantics**
+
+#### Key Hypothesis ($H_1$)
+By leveraging explicit AST reclamation triggers (`{};`), the compiler can compute the exact, non-probabilistic peak stack depth at compile time, eliminating the need for dynamic runtime stack monitoring or worst-case execution time (WCET) heuristics in safety-critical RTOS applications.
+
+#### Paper Structural Outline (IEEE Format)
+* **I. Introduction:** The challenge of stack overflow in safety-critical systems (ISO 26262 / DO-178C standard compliance) and limitations of dynamic stack monitoring.
+* **II. Static Bound Synthesis Engine:** Mathematical formulation of stack frame boundaries using front-end AST traversal algorithms without control-flow graph (CFG) state explosion.
+* **III. Formal Proof & Verification:** Proving that $\text{Stack}_{\text{Peak}} \le \sum \text{AST}_{\text{Scope}_{\text{Max}}}$ for any non-recursive execution path on ARM Cortex-M.
+* **IV. Empirical Evaluation:** Benchmarking static memory upper bounds against FreeRTOS/Zephyr RTOS stack allocation margins.
+* **V. Conclusion:** Establishing a certified zero-runtime-overhead stack safety model for mission-critical embedded systems.
+
+---
+
+### BRANCH B (IF TRADE-OFF RESULT): Adaptive Scope Optimization
+
+> **Scenario:** Front-end direct reclamation introduces instruction bloat or register spilling overhead in dense, sequential scopes compared to global back-end optimizations (`GCC -O2`).
+
+#### Paper 2 Title
+**Heuristic Scope Coalescing: Balancing Instruction Overhead and Memory Determinism in Front-End Reclamation**
+
+#### Key Hypothesis ($H_1$)
+An intermediate AST pass that dynamically coalesces adjacent explicit scopes based on register pressure thresholds will eliminate front-end instruction bloat while preserving guaranteed memory bounds for high-priority variables.
+
+#### Paper Structural Outline (IEEE Format)
+* **I. Introduction:** Analyzing the trade-offs of naive front-end stack reclamation: instruction count penalties vs. memory determinism during high register pressure.
+* **II. Adaptive Scope Coalescing Algorithm:** Introducing a lightweight AST pass that merges adjacent `{ @int x; };` blocks when register spilling is detected, converting multiple stack pointer adjustments (`ADD SP, SP, #N`) into a single coalesced reclamation frame.
+* **III. Compiler Infrastructure:** Implementing register pressure estimation heuristic within the Kaoru Parser before final Thumb-2 code generation.
+* **IV. Experimental Benchmark:** Measuring the reduction in instruction overhead (Cycles) and binary footprint (Bytes) across sequential vs. nested scope benchmarks on QEMU.
+* **V. Discussion & Conclusion:** Defining the optimal Pareto frontier between strict AST determinism and back-end optimization efficiency.
