@@ -118,3 +118,7 @@ An intermediate AST pass that dynamically coalesces adjacent explicit scopes bas
 * **III. Compiler Infrastructure:** Implementing register pressure estimation heuristic within the Kaoru Parser before final Thumb-2 code generation.
 * **IV. Experimental Benchmark:** Measuring the reduction in instruction overhead (Cycles) and binary footprint (Bytes) across sequential vs. nested scope benchmarks on QEMU.
 * **V. Discussion & Conclusion:** Defining the optimal Pareto frontier between strict AST determinism and back-end optimization efficiency.
+---
+#### IDEA
+* Unlike traditional compiler architectures where the middle-end infers memory lifecycles via control-flow graphs, our architecture establishes the front-end AST as the authoritative intent-giver for stack reclamation. The middle-end functions strictly as a constraint-preserving optimizer—improving execution velocity while contractually preserving the explicit structural boundaries defined by the AST.
+* 
