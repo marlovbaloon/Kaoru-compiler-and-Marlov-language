@@ -198,3 +198,7 @@ Instead of executing computationally expensive Graph Coloring or Complex Control
   * **Thermal Hotspot Mitigation:** Analyzing thermal dissipation patterns in high-density loop and scope executions.
 * **V. Discussion & Pareto Optimization:** Mapping the Pareto Frontier between **Absolute Memory Determinism (Paper 1/3)**, **Formal Bounds Safety (Paper 2)**, and **Energy/Thermal Efficiency (Paper 4)**.
 * **VI. Conclusion:** Establishing a holistic, hardware-aware compiler framework that unifies language semantics with physical silicon realities.
+## Q&A(maybe)
+Q: What about edge cases X, Y, and Z?
+
+A: "Those cases are intentionally excluded from the target domain—bare-metal safety-critical systems—by design, in exchange for 100% compile-time determinism and zero runtime overhead. Attempting to solve application-level wicked problems inside the compiler front-end only introduces over-engineering and semantic loss, as seen in traditional production toolchains like GCC and LLVM."
