@@ -8,11 +8,11 @@
 /* =========================================================================
  * Forward Declarations & Helpers
  * ========================================================================= */
-void generate_code_from_ast(FILE *out, ASTNode *node);
-void generate_print_asm(FILE *out, ASTNode *node);
-void generate_if_asm(FILE *out, ASTNode *node);
-void generate_block_asm(FILE *out, ASTNode *node);
-void generate_binary_op_asm(FILE *out, ASTNode *node);
+void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_print_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_if_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_block_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 
 static int label_counter = 0;
 
@@ -111,7 +111,7 @@ void generate_assembly_entry(FILE *out, SecurityContext *ctx) {
 /* =========================================================================
  * AST Code Generator Dispatcher
  * ========================================================================= */
-void generate_code_from_ast(FILE *out, ASTNode *node) {
+void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node) return;
 
     switch (node->type) {
@@ -141,24 +141,53 @@ void generate_code_from_ast(FILE *out, ASTNode *node) {
         case NODE_GT:
         case NODE_LTE:
         case NODE_GTE:
-            generate_binary_op_asm(out, node);
+            generate_binary_op_asm(out, node, sec_ctx);
             break;
 
         case NODE_VAR_DECL:
-            generate_code_from_ast(out, node->left);
+            generate_code_from_ast(out, node->left, sec_ctx);
             fprintf(out, "    ; Variable Decl: %s initialized\n", node->var_name);
             break;
 
         case NODE_BLOCK:
-            generate_block_asm(out, node);
+            generate_block_asm(out, node, sec_ctx);
             break;
 
         case NODE_IF:
-            generate_if_asm(out, node);
+            generate_if_asm(out, node, sec_ctx);
             break;
 
         case PRINT_NODE:
-            generate_print_asm(out, node);
+            generate_print_asm(out, node, sec_ctx);
+            break;
+
+        case NODE_SYS_CHECK:
+            fprintf(out, "    ; --- @sys Verification Trap ---\n");
+            generate_assembly_entry(out, sec_ctx);
+            break;
+
+        case NODE_EXIT:
+            fprintf(out, "    ; --- @exit Statement ---\n");
+            generate_code_from_ast(out, node->left, sec_ctx); 
+#if defined(__x86_64__) || defined(_M_X64)
+            fprintf(out, "    mov rdi, rax\n");
+            fprintf(out, "    call exit\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+            fprintf(out, "    bl exit\n");
+#endif
+            break;
+
+        case NODE_PANIC:
+            fprintf(out, "    ; --- @panic Statement ---\n");
+            generate_code_from_ast(out, node->left, sec_ctx);
+#if defined(__x86_64__) || defined(_M_X64)
+            fprintf(out, "    mov rdi, rax\n");
+            fprintf(out, "    call mlov_print_str\n");
+            fprintf(out, "    ud2\n"); // Hardware Trap
+#elif defined(__aarch64__) || defined(_M_ARM64)
+            fprintf(out, "    bl mlov_print_str\n");
+            fprintf(out, "    .word 0xd4200000\n");
+#endif
             break;
 
         default:
@@ -168,22 +197,20 @@ void generate_code_from_ast(FILE *out, ASTNode *node) {
 }
 
 /* =========================================================================
- * Generate Assembly for Binary Operations (+, -, *, /, Relational)
+ * Generate Assembly for Binary Operations
  * ========================================================================= */
-void generate_binary_op_asm(FILE *out, ASTNode *node) {
-    // Generate Right AST (ผลลัพธ์ไปฝั่ง Stack หรือ Register สำรอง)
-    generate_code_from_ast(out, node->right);
+void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    generate_code_from_ast(out, node->right, sec_ctx);
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, "    push rax\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
     fprintf(out, "    str x0, [sp, #-16]!\n");
 #endif
 
-    // Generate Left AST
-    generate_code_from_ast(out, node->left);
+    generate_code_from_ast(out, node->left, sec_ctx);
 
 #if defined(__x86_64__) || defined(_M_X64)
-    fprintf(out, "    pop rbx\n"); // rbx = Right, rax = Left
+    fprintf(out, "    pop rbx\n");
     switch (node->type) {
         case NODE_ADD: fprintf(out, "    add rax, rbx\n"); break;
         case NODE_SUB: fprintf(out, "    sub rax, rbx\n"); break;
@@ -214,7 +241,7 @@ void generate_binary_op_asm(FILE *out, ASTNode *node) {
     }
 
 #elif defined(__aarch64__) || defined(_M_ARM64)
-    fprintf(out, "    ldr x1, [sp], #16\n"); // x0 = Left, x1 = Right
+    fprintf(out, "    ldr x1, [sp], #16\n");
     switch (node->type) {
         case NODE_ADD: fprintf(out, "    add x0, x0, x1\n"); break;
         case NODE_SUB: fprintf(out, "    sub x0, x0, x1\n"); break;
@@ -246,11 +273,11 @@ void generate_binary_op_asm(FILE *out, ASTNode *node) {
 /* =========================================================================
  * Generate Assembly for Block Scopes
  * ========================================================================= */
-void generate_block_asm(FILE *out, ASTNode *node) {
+void generate_block_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_BLOCK) return;
     fprintf(out, "    ; --- Scope Block ENTER ---\n");
     for (int i = 0; i < node->stmt_count; i++) {
-        generate_code_from_ast(out, node->statements[i]);
+        generate_code_from_ast(out, node->statements[i], sec_ctx);
     }
     fprintf(out, "    ; --- Scope Block EXIT ---\n");
 }
@@ -258,9 +285,9 @@ void generate_block_asm(FILE *out, ASTNode *node) {
 /* =========================================================================
  * Generate Assembly for @print
  * ========================================================================= */
-void generate_print_asm(FILE *out, ASTNode *node) {
+void generate_print_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != PRINT_NODE || !node->left) return;
-    generate_code_from_ast(out, node->left);
+    generate_code_from_ast(out, node->left, sec_ctx);
     fprintf(out, "    ; --- @print Statement ---\n");
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -271,7 +298,6 @@ void generate_print_asm(FILE *out, ASTNode *node) {
         fprintf(out, "    call mlov_print_int\n");
     }
 #elif defined(__aarch64__) || defined(_M_ARM64)
-    fprintf(out, "    mov x0, x0\n");
     if (node->left->type == NODE_STR) {
         fprintf(out, "    bl mlov_print_str\n");
     } else {
@@ -283,14 +309,13 @@ void generate_print_asm(FILE *out, ASTNode *node) {
 /* =========================================================================
  * Generate Assembly for Conditional If Statements
  * ========================================================================= */
-void generate_if_asm(FILE *out, ASTNode *node) {
+void generate_if_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_IF || !node->cond) return;
 
     int cur_id = label_counter++;
     fprintf(out, "    ; --- If Statement Start ---\n");
     
-    // Evaluate condition -> Result is in rax / x0 (1 = true, 0 = false)
-    generate_code_from_ast(out, node->cond);
+    generate_code_from_ast(out, node->cond, sec_ctx);
 
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, "    cmp rax, 0\n");
@@ -307,8 +332,7 @@ void generate_if_asm(FILE *out, ASTNode *node) {
     }
 #endif
 
-    // Then Branch
-    generate_code_from_ast(out, node->then_branch);
+    generate_code_from_ast(out, node->then_branch, sec_ctx);
 
     if (node->else_branch) {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -318,7 +342,7 @@ void generate_if_asm(FILE *out, ASTNode *node) {
         fprintf(out, "    b .L_end_if_%d\n", cur_id);
         fprintf(out, ".L_else_%d:\n", cur_id);
 #endif
-        generate_code_from_ast(out, node->else_branch);
+        generate_code_from_ast(out, node->else_branch, sec_ctx);
     }
 
     fprintf(out, ".L_end_if_%d:\n", cur_id);
