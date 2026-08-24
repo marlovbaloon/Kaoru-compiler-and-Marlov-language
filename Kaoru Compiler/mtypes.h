@@ -37,7 +37,10 @@ typedef enum {
     NODE_LT,        /* < */
     NODE_GT,        /* > */
     NODE_LTE,       /* <= */
-    NODE_GTE        /* >= */
+    NODE_GTE,        /* >= */
+    TOKEN_AT_EXIT,
+    TOKEN_AT_PANIC,
+    NODE_VAR_REF
 } ASTNodeType;      
 
 /* Alias NodeType */
@@ -46,7 +49,7 @@ typedef ASTNodeType NodeType;
 typedef struct ASTNode {
     ASTNodeType type;
     int val;
-    char str_val[67];
+    char str_val[68];
     char var_name[32];
     struct ASTNode *left;
     struct ASTNode *right;
@@ -56,7 +59,11 @@ typedef struct ASTNode {
     struct ASTNode **statements;  
     int stmt_count;              
 } ASTNode;
-
+typedef struct ASTArena {
+    ASTNode *nodes;
+    size_t capacity;
+    size_t count;
+} ASTArena;
 typedef struct {
     MTokenType type;              
     char value[64];

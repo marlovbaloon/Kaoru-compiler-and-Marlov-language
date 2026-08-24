@@ -9,7 +9,13 @@ extern Token next_token(FILE *f);
 
 /* Forward declaration */
 static ASTNode* parse_expression(FILE *in, Token *current_tok);
-static ASTNode* parse_statement(FILE *in, Token *current_tok);
+static ASTArena global_arena = {NULL, 0, 0};
+
+void init_ast_arena(size_t initial_capacity) {
+    global_arena.nodes = (ASTNode *)malloc(sizeof(ASTNode) * initial_capacity);
+    global_arena.capacity = initial_capacity;
+    global_arena.count = 0;
+}
 
 /* =========================================================================
  * AST Node Creation Helpers
@@ -447,6 +453,18 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
         }
 
         return create_var_decl_node(var_name, expr);
+    }
+    if (current_tok->type == TOKEN_AT_EXIT) {
+        *current_tok = next_token(in);
+        ASTNode *expr = parse_expression(in, current_tok);
+        if (current_tok->type == TOKEN_SEMICOLON) *current_tok = next_token(in);
+        return create_exit_node(expr);
+    }
+    if (current_tok->type == TOKEN_AT_PANIC) {
+        *current_tok = next_token(in);
+        ASTNode *expr = parse_expression(in, current_tok);
+        if (current_tok->type == TOKEN_SEMICOLON) *current_tok = next_token(in);
+        return create_panic_node(expr);
     }
 
     ASTNode *expr = parse_relational(in, current_tok);

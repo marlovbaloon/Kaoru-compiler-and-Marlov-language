@@ -55,13 +55,23 @@ Token next_token(FILE *file) {
         if (c == '"') {
             int idx = 0;
             while ((c = fgetc(file)) != EOF && c != '"') {
-                if (c == '\n') current_line++;
-                if (idx < (int)sizeof(tok.value) - 1) tok.value[idx++] = (char)c;
+                if (c == '\\') { // Escape Character Handling
+                int next = fgetc(file);
+                if (next == 'n') c = '\n';
+                else if (next == 't') c = '\t';
+                else if (next == '"') c = '"';
+                else if (next == '\\') c = '\\';
+                else ungetc(next, file);
             }
-            tok.value[idx] = '\0';
-            tok.type = TOKEN_STRING_LIT;
-            return tok;
+            if (c == '\n') current_line++;
+            if (idx < (int)sizeof(tok.value) - 1) {
+            tok.value[idx++] = (char)c;
         }
+    }
+    tok.value[idx] = '\0';
+    tok.type = TOKEN_STRING_LIT;
+    return tok;
+    }
 
         /* 3. Numbers */
         if (isdigit(c)) {
@@ -168,7 +178,30 @@ Token next_token(FILE *file) {
             }
         }
     }
+    if (ch == '@') {
+    char buffer[32] = {0};
+    int idx = 0;
+    
+    while (isalnum(peek_next_char(lexer)) || peek_next_char(lexer) == '.') {
+        buffer[idx++] = get_next_char(lexer);
+        if (idx >= sizeof(buffer) - 1) break;
+    }
 
+    if (strcmp(buffer, "exit") == 0) return create_token(TOKEN_AT_EXIT, "@exit");
+    if (strcmp(buffer, "panic") == 0) return create_token(TOKEN_AT_PANIC, "@panic");}
+    if (ch == '<') {
+    if (peek_next_char(lexer) == '=') {
+        get_next_char(lexer);
+        return create_token(TOKEN_LTE, "<=");
+    }
+    return create_token(TOKEN_LT, "<");}
+    if (ch == '>') {
+    if (peek_next_char(lexer) == '=') {
+        get_next_char(lexer);
+        return create_token(TOKEN_GTE, ">=");
+    }
+    return create_token(TOKEN_GT, ">");}
+    
     tok.line = current_line;
     tok.type = TOKEN_EOF;
     tok.value[0] = '\0';
