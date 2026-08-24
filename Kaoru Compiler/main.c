@@ -105,6 +105,10 @@ int main(int argc, char *argv[]) {
         if (dump_ast) {
             printf("[Kaoru Debug]: AST Root Type = %d\n", root->type);
         }
+        IRProgram *ir = generate_ir(root);
+        generate_code_from_ir(ir, file_out);
+        fclose(file_out);
+        free_ir(ir);
         free_ast(root);
         root = NULL;
     }
