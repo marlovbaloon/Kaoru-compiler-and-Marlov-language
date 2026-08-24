@@ -170,16 +170,24 @@ void free_ast(ASTNode *node) {
  * Security Context
  * ========================================================================= */
 void parse_program(FILE *in, SecurityContext *sec_ctx) {
+    long original_pos = ftell(in); // remember address file
+    rewind(in); // return to file
+
     Token tok = next_token(in);
-    while (tok.type == TOKEN_AT_SYS) {
-        if (strcmp(tok.value, "@sys.disk.read") == 0) {
-            sec_ctx->permissions |= PERM_DISK_READ;
+    while (tok.type != TOKEN_EOF) {
+        if (tok.type == TOKEN_AT_SYS) {
+            if (strcmp(tok.value, "@sys.disk.read") == 0) {
+                sec_ctx->permissions |= PERM_DISK_READ;
+            }
         }
         tok = next_token(in);
     }
+
     sec_ctx->hardware_hash = get_hardware_signature();
     printf("[Kaoru Compiler]: Security context initialized. Owner Hash: 0x%LX\n", (unsigned long long)sec_ctx->hardware_hash);   
-} 
+
+    fseek(in, original_pos, SEEK_SET); //  return address before start Parse AST
+}
 
 /* =========================================================================
  * Expression & Statement Recursive Descent Parser
@@ -453,5 +461,22 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
 ASTNode* parse(FILE *in) {
     Token tok = next_token(in);
     if (tok.type == TOKEN_EOF) return NULL;
-    return parse_statement(in, &tok);
+
+    ASTNode **stmts = NULL;
+    int capacity = 0;
+    int count = 0;
+
+    while (tok.type != TOKEN_EOF) {
+        ASTNode *stmt = parse_statement(in, &tok);
+        if (stmt) {
+            if (count >= capacity) {
+                capacity = (capacity == 0) ? 4 : capacity * 2;
+                ASTNode **new_stmts = realloc(stmts, sizeof(ASTNode*) * capacity);
+                if (!new_stmts) { free(stmts); exit(1); }
+                stmts = new_stmts;
+            }
+            stmts[count++] = stmt;
+        }
+    }
+    return create_block_node(stmts, count); // return Root Block 
 }

@@ -136,7 +136,7 @@ Token next_token(FILE *file) {
         if (c == '!') {
             int next_c = fgetc(file);
             if (next_c == '=') {
-                tok.type = TOKEN_EQ;
+                tok.type = TOKEN_NEQ;
                 strcpy(tok.value, "!=");
             } else {
                 ungetc(next_c, file);
