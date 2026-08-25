@@ -14,7 +14,7 @@ void generate_if_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_block_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
-
+void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 static int label_counter = 0;
 static int str_label_counter = 0;
 
@@ -193,7 +193,13 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             fprintf(out, "    ; --- @sys Verification Trap ---\n");
             generate_assembly_entry(out, sec_ctx);
             break;
+        case NODE_IF:
+            generate_if_asm(out, node, sec_ctx);
+            break;
 
+        case NODE_WHILE:
+            generate_while_asm(out, node, sec_ctx);
+            break;
         case NODE_EXIT:
             fprintf(out, "    ; --- @exit Statement ---\n");
             generate_code_from_ast(out, node->left, sec_ctx); 
@@ -448,4 +454,38 @@ void generate_if_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 
     fprintf(out, ".L_end_if_%d:\n", cur_id);
     fprintf(out, "    ; --- If Statement End ---\n");
+}
+/* =========================================================================
+ * Generate Assembly for While Loops
+ * ========================================================================= */
+void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    if (!node || node->type != NODE_WHILE || !node->cond) return;
+
+    int cur_id = label_counter++;
+    fprintf(out, "    ; --- While Statement Start ---\n");
+
+  
+    fprintf(out, ".L_while_start_%d:\n", cur_id);
+
+    generate_code_from_ast(out, node->cond, sec_ctx);
+
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    cmp rax, 0\n");
+    fprintf(out, "    je .L_while_end_%d\n", cur_id);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    cbz x0, .L_while_end_%d\n", cur_id);
+#endif
+
+    // 4. code for body loop (then_branch)
+    generate_code_from_ast(out, node->then_branch, sec_ctx);
+
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    jmp .L_while_start_%d\n", cur_id);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    b .L_while_start_%d\n", cur_id);
+#endif
+
+
+    fprintf(out, ".L_while_end_%d:\n", cur_id);
+    fprintf(out, "    ; --- While Statement End ---\n");
 }
