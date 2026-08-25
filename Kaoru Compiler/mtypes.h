@@ -25,6 +25,8 @@ typedef enum {
     TOKEN_GT,       /* > */
     TOKEN_LTE,      /* <= */
     TOKEN_GTE       /* >= */
+    TOKEN_AT_EXIT,
+    TOKEN_AT_PANIC
 } MTokenType;
 
 typedef enum { 
@@ -38,9 +40,8 @@ typedef enum {
     NODE_GT,        /* > */
     NODE_LTE,       /* <= */
     NODE_GTE,        /* >= */
-    TOKEN_AT_EXIT,
-    TOKEN_AT_PANIC,
-    NODE_VAR_REF
+    NODE_VAR_REF, 
+    NODE_WHILE
 } ASTNodeType;      
 
 /* Alias NodeType */

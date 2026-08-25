@@ -138,7 +138,15 @@ ASTNode* create_if_node(ASTNode* cond, ASTNode* then_branch, ASTNode* else_branc
     node->else_branch = else_branch;
     return node;
 }
-
+ASTNode* create_while_node(ASTNode* cond, ASTNode* body) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node) exit(1);
+    memset(node, 0, sizeof(ASTNode));
+    node->type = NODE_WHILE;
+    node->cond = cond;          // stack condition
+    node->then_branch = body;   // stack block in loop
+    return node;
+}
 ASTNode* create_binary_node(ASTNodeType type, ASTNode* left, ASTNode* right) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) exit(1);
@@ -223,7 +231,13 @@ void free_ast(ASTNode *node) {
         free(node);
         return;
     }
-    
+    if (node->type == NODE_IF || node->type == NODE_WHILE) {
+        free_ast(node->cond);
+        free_ast(node->then_branch);
+        if (node->type == NODE_IF) free_ast(node->else_branch);
+        free(node);
+        return;
+    }
     free_ast(node->left);
     free_ast(node->right);
     free(node);
@@ -521,7 +535,33 @@ static ASTNode* parse_if_statement(FILE *in, Token *current_tok) {
 
     return create_if_node(cond, then_branch, else_branch);
 }
+static ASTNode* parse_while_statement(FILE *in, Token *current_tok) {
+    *current_tok = next_token(in); // Consume 'while'
 
+    if (current_tok->type != TOKEN_LPAREN) {
+        printf("[Kaoru Syntax Error Line %u]: Expected '(' after 'while'\n", current_tok->line);
+        return NULL;
+    }
+    *current_tok = next_token(in); // Consume '('
+
+    ASTNode *cond = parse_relational(in, current_tok);
+    if (!cond) return NULL;
+    
+    if (current_tok->type != TOKEN_RPAREN) {
+        printf("[Kaoru Syntax Error Line %u]: Expected ')' after while condition\n", current_tok->line);
+        free_ast(cond);
+        return NULL;
+    }
+    *current_tok = next_token(in); // Consume ')'
+
+    ASTNode *body = parse_statement_or_block(in, current_tok);
+    if (!body) {
+        free_ast(cond);
+        return NULL;
+    }
+
+    return create_while_node(cond, body);
+}
 /* Consolidated Main Statement Router */
 static ASTNode* parse_statement(FILE *in, Token *current_tok) {
     // 1. Standalone Empirical Scope Block `{ ... };`
@@ -533,7 +573,10 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
     if (current_tok->type == TOKEN_IF) {
         return parse_if_statement(in, current_tok);
     }
-
+    // Control Flow: WHILE
+    if (current_tok->type == TOKEN_WHILE) {
+        return parse_while_statement(in, current_tok);
+    }
     // 3. Print Directive
     if (current_tok->type == TOKEN_AT_PRINT) {
         *current_tok = next_token(in); 
