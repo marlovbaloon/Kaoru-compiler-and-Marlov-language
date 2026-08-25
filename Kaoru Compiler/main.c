@@ -1,4 +1,4 @@
-//main.c
+// main.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,7 +23,7 @@ static void print_usage(const char *prog_name) {
     printf("Architecture: Native C + Assembly\n\n");
     printf("Usage: %s <source_file.ml> [options]\n\n", prog_name);
     printf("Options:\n");
-    printf("  -o <output>    Specify output executable name (default: a.out / out.exe)\n");
+    printf("  -o <output>    Specify output executable/assembly name (default: a.out)\n");
     printf("  --dump-ast     Print AST structure for debugging\n");
     printf("  -v, --version  Display compiler version information\n");
     printf("  -h, --help     Display this help message\n");
@@ -99,22 +99,37 @@ int main(int argc, char *argv[]) {
 
     /* Main AST Parsing Loop */
     ASTNode *root = parse(source);
+    fclose(source);
+
     if (!root) {
-        printf("[Kaoru Compiler]: Parsing finished (Empty or Single Statement AST).\n");
-    } else {
-        if (dump_ast) {
-            printf("[Kaoru Debug]: AST Root Type = %d\n", root->type);
-        }
-        IRProgram *ir = generate_ir(root);
-        generate_code_from_ir(ir, file_out);
-        fclose(file_out);
-        free_ir(ir);
-        free_ast(root);
-        root = NULL;
+        printf("[Kaoru Compiler]: Parsing finished (Empty AST).\n");
+        return 0;
     }
 
-    fclose(source);
-    
+    if (dump_ast) {
+        printf("[Kaoru Debug]: AST Root Type = %d\n", root->type);
+    }
+
+    /* -------------------------------------------------------------------------
+     * 4. Code Generation Phase
+     * ------------------------------------------------------------------------- */
+    FILE *file_out = fopen(output_file, "w");
+    if (!file_out) {
+        printf("[Kaoru Fatal Error]: Cannot open output file '%s'\n", output_file);
+        free_ast(root);
+        return 1;
+    }
+
+    /* Generate Runtime Guard Headers & Assembly Entry */
+    generate_runtime_header(file_out, &sec_ctx);
+    generate_assembly_entry(file_out, &sec_ctx);
+
+    /* Direct AST to Assembly/Code Generation */
+    generate_code_from_ast(file_out, root, &sec_ctx);
+
+    fclose(file_out);
+    free_ast(root);
+
     printf("===========================================\n");
     printf("[Kaoru Compiler]: Compilation Successful!\n");
     printf("[Kaoru Compiler]: Output binary generated: %s\n", output_file);

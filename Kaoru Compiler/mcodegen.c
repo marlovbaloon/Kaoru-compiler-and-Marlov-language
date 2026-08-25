@@ -13,8 +13,17 @@ void generate_print_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_if_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_block_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 
 static int label_counter = 0;
+static int str_label_counter = 0;
+
+/* Registers for ABI argument passing */
+#if defined(__x86_64__) || defined(_M_X64)
+static const char *ARG_REGS[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+#elif defined(__aarch64__) || defined(_M_ARM64)
+static const char *ARG_REGS[] = {"x0", "x1", "x2", "x3", "x4", "x5"};
+#endif
 
 /* =========================================================================
  * Runtime Helpers (C-Level Abstraction)
@@ -131,6 +140,21 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 #endif
             break;
 
+        case NODE_STR: {
+            int str_id = str_label_counter++;
+            fprintf(out, ".section .rodata\n");
+            fprintf(out, ".LC_str_%d:\n", str_id);
+            fprintf(out, "    .string \"%s\"\n", node->str_val);
+            fprintf(out, ".text\n");
+#if defined(__x86_64__) || defined(_M_X64)
+            fprintf(out, "    lea rax, .LC_str_%d[rip]\n", str_id);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+            fprintf(out, "    adrp x0, .LC_str_%d\n", str_id);
+            fprintf(out, "    add x0, x0, :lo12:.LC_str_%d\n", str_id);
+#endif
+            break;
+        }
+
         case NODE_ADD:
         case NODE_SUB:
         case NODE_MUL:
@@ -161,6 +185,10 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             generate_print_asm(out, node, sec_ctx);
             break;
 
+        case NODE_BUILTIN_CALL:
+            generate_builtin_call_asm(out, node, sec_ctx);
+            break;
+
         case NODE_SYS_CHECK:
             fprintf(out, "    ; --- @sys Verification Trap ---\n");
             generate_assembly_entry(out, sec_ctx);
@@ -183,7 +211,7 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 #if defined(__x86_64__) || defined(_M_X64)
             fprintf(out, "    mov rdi, rax\n");
             fprintf(out, "    call mlov_print_str\n");
-            fprintf(out, "    ud2\n"); // Hardware Trap
+            fprintf(out, "    ud2\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
             fprintf(out, "    bl mlov_print_str\n");
             fprintf(out, "    .word 0xd4200000\n");
@@ -193,6 +221,79 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
         default:
             fprintf(out, "    ; [CodeGen]: Unhandled AST Node type (%d)\n", node->type);
             break;
+    }
+}
+
+/* =========================================================================
+ * Generate Assembly for Builtin Directives (@open, @read, @write, etc.)
+ * ========================================================================= */
+void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    if (!node || node->type != NODE_BUILTIN_CALL) return;
+
+    fprintf(out, "    ; --- Directives Call: Builtin %d ---\n", node->builtin_kind);
+
+    /* Evaluate args and push them onto the stack to preserve order */
+    for (int i = 0; i < node->arg_count; i++) {
+        generate_code_from_ast(out, node->args[i], sec_ctx);
+#if defined(__x86_64__) || defined(_M_X64)
+        fprintf(out, "    push rax\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        fprintf(out, "    str x0, [sp, #-16]!\n");
+#endif
+    }
+
+    /* Pop evaluation results into target register locations according to ABI */
+    for (int i = node->arg_count - 1; i >= 0; i--) {
+        if (i < 6) {
+#if defined(__x86_64__) || defined(_M_X64)
+            fprintf(out, "    pop %s\n", ARG_REGS[i]);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+            fprintf(out, "    ldr %s, [sp], #16\n", ARG_REGS[i]);
+#endif
+        }
+    }
+
+    /* Target Function Resolution & Security Gate Checks */
+    const char *target_func = NULL;
+    switch (node->builtin_kind) {
+        case BUILTIN_OPEN:
+            if (sec_ctx && !(sec_ctx->permissions & PERM_DISK_READ)) {
+                fprintf(out, "    ; Security Trap: Unauthorized @open invocation\n");
+#if defined(__x86_64__) || defined(_M_X64)
+                fprintf(out, "    ud2\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+                fprintf(out, "    .word 0xd4200000\n");
+#endif
+                return;
+            }
+            target_func = "fopen";
+            break;
+        case BUILTIN_READ:   target_func = "fread"; break;
+        case BUILTIN_WRITE:  target_func = "fwrite"; break;
+        case BUILTIN_CLOSE:  target_func = "fclose"; break;
+        case BUILTIN_ALLOC:  target_func = "malloc"; break;
+        case BUILTIN_FREE:   target_func = "free"; break;
+        case BUILTIN_EXIT:   target_func = "exit"; break;
+        case BUILTIN_PANIC:
+#if defined(__x86_64__) || defined(_M_X64)
+            fprintf(out, "    call mlov_print_str\n");
+            fprintf(out, "    ud2\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+            fprintf(out, "    bl mlov_print_str\n");
+            fprintf(out, "    .word 0xd4200000\n");
+#endif
+            return;
+        default:
+            fprintf(out, "    ; Unknown builtin call mapping\n");
+            return;
+    }
+
+    if (target_func) {
+#if defined(__x86_64__) || defined(_M_X64)
+        fprintf(out, "    call %s\n", target_func);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        fprintf(out, "    bl %s\n", target_func);
+#endif
     }
 }
 

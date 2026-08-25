@@ -75,6 +75,25 @@ typedef struct {
     uint64_t hardware_hash; 
 } SecurityContext;
 
+typedef enum {
+    BUILTIN_OPEN,
+    BUILTIN_READ,
+    BUILTIN_WRITE,
+    BUILTIN_CLOSE,
+    BUILTIN_ALLOC,
+    BUILTIN_FREE,
+    BUILTIN_SIZEOF,
+    BUILTIN_EXIT,
+    BUILTIN_PANIC
+} BuiltinKind;
+
+typedef struct ASTNode {
+    NodeType type; // AST_BUILTIN_CALL
+    BuiltinKind builtin_kind;
+    struct ASTNode **args;
+    int arg_count;
+} ASTNode;
+
 /* Forward Declaration for permission system */
 uint64_t get_hardware_signature(void);
 

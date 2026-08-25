@@ -7,14 +7,31 @@
 
 extern Token next_token(FILE *f); 
 
-/* Forward declaration */
+/* Forward declarations */
+static ASTNode* parse_statement(FILE *in, Token *current_tok);
+static ASTNode* parse_statement_or_block(FILE *in, Token *current_tok);
 static ASTNode* parse_expression(FILE *in, Token *current_tok);
+static ASTNode* parse_builtin_call(FILE *in, Token *current_tok);
+
 static ASTArena global_arena = {NULL, 0, 0};
 
 void init_ast_arena(size_t initial_capacity) {
     global_arena.nodes = (ASTNode *)malloc(sizeof(ASTNode) * initial_capacity);
     global_arena.capacity = initial_capacity;
     global_arena.count = 0;
+}
+
+static BuiltinKind resolve_builtin_kind(const char *name) {
+    if (strcmp(name, "open") == 0)   return BUILTIN_OPEN;
+    if (strcmp(name, "read") == 0)   return BUILTIN_READ;
+    if (strcmp(name, "write") == 0)  return BUILTIN_WRITE;
+    if (strcmp(name, "close") == 0)  return BUILTIN_CLOSE;
+    if (strcmp(name, "alloc") == 0)  return BUILTIN_ALLOC;
+    if (strcmp(name, "free") == 0)   return BUILTIN_FREE;
+    if (strcmp(name, "sizeof") == 0) return BUILTIN_SIZEOF;
+    if (strcmp(name, "exit") == 0)   return BUILTIN_EXIT;
+    if (strcmp(name, "panic") == 0)  return BUILTIN_PANIC;
+    return -1;
 }
 
 /* =========================================================================
@@ -72,11 +89,12 @@ ASTNode* create_div_node(ASTNode* left, ASTNode* right) {
     return node;
 }
 
-ASTNode* create_var_decl_node(const char* name, ASTNode* expr) {
+ASTNode* create_var_decl_node(MTokenType data_type, const char* name, ASTNode* expr) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) exit(1);
     memset(node, 0, sizeof(ASTNode));
     node->type = NODE_VAR_DECL;
+    node->data_type = data_type; 
     strncpy(node->var_name, name, sizeof(node->var_name) - 1);
     node->left = expr; 
     return node;
@@ -84,9 +102,10 @@ ASTNode* create_var_decl_node(const char* name, ASTNode* expr) {
 
 ASTNode* create_string_node(const char* str_val) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
-    if (!node) exit(1);
+    if (!node) return NULL;
     memset(node, 0, sizeof(ASTNode));
     node->type = NODE_STR;
+    strncpy(node->str_val, str_val, sizeof(node->str_val) - 1);
     strncpy(node->var_name, str_val, sizeof(node->var_name) - 1);
     return node;
 }
@@ -130,7 +149,6 @@ ASTNode* create_binary_node(ASTNodeType type, ASTNode* left, ASTNode* right) {
     return node;
 }
 
-/* Equivalent to AST_SCOPE_BLOCK in paper-1.md */
 ASTNode* create_block_node(ASTNode** stmts, int count) {
     ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
     if (!node) exit(1);
@@ -138,6 +156,35 @@ ASTNode* create_block_node(ASTNode** stmts, int count) {
     node->type = NODE_BLOCK;
     node->statements = stmts;
     node->stmt_count = count;
+    return node;
+}
+
+ASTNode* create_exit_node(ASTNode *expr) {
+    ASTNode *node = (ASTNode*)malloc(sizeof(ASTNode));
+    if (!node) return NULL;
+    memset(node, 0, sizeof(ASTNode));
+    node->type = NODE_EXIT;
+    node->left = expr;
+    return node;
+}
+
+ASTNode* create_panic_node(ASTNode *expr) {
+    ASTNode *node = (ASTNode*)malloc(sizeof(ASTNode));
+    if (!node) return NULL;
+    memset(node, 0, sizeof(ASTNode));
+    node->type = NODE_PANIC;
+    node->left = expr;
+    return node;
+}
+
+ASTNode* create_builtin_node(BuiltinKind kind, ASTNode **args, int arg_count) {
+    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    if (!node) exit(1);
+    memset(node, 0, sizeof(ASTNode));
+    node->type = NODE_BUILTIN_CALL;
+    node->builtin_kind = kind;
+    node->args = args;
+    node->arg_count = arg_count;
     return node;
 }
 
@@ -160,8 +207,18 @@ void free_ast(ASTNode *node) {
         free(node);
         return;
     }
+
+    if (node->type == NODE_BUILTIN_CALL) {
+        for (int i = 0; i < node->arg_count; i++) {
+            free_ast(node->args[i]);
+        }
+        free(node->args);
+        free(node);
+        return;
+    }
     
-    if (node->type == PRINT_NODE) {
+    if (node->type == PRINT_NODE || node->type == NODE_EXIT || 
+        node->type == NODE_PANIC || node->type == NODE_VAR_DECL) {
         free_ast(node->left); 
         free(node);
         return;
@@ -176,8 +233,8 @@ void free_ast(ASTNode *node) {
  * Security Context
  * ========================================================================= */
 void parse_program(FILE *in, SecurityContext *sec_ctx) {
-    long original_pos = ftell(in); // remember address file
-    rewind(in); // return to file
+    long original_pos = ftell(in);
+    rewind(in);
 
     Token tok = next_token(in);
     while (tok.type != TOKEN_EOF) {
@@ -192,14 +249,80 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
     sec_ctx->hardware_hash = get_hardware_signature();
     printf("[Kaoru Compiler]: Security context initialized. Owner Hash: 0x%LX\n", (unsigned long long)sec_ctx->hardware_hash);   
 
-    fseek(in, original_pos, SEEK_SET); //  return address before start Parse AST
+    fseek(in, original_pos, SEEK_SET);
 }
 
 /* =========================================================================
  * Expression & Statement Recursive Descent Parser
  * ========================================================================= */
 
+static ASTNode* parse_builtin_call(FILE *in, Token *current_tok) {
+    const char *name = current_tok->value;
+    if (name[0] == '@') name++;
+
+    BuiltinKind kind = resolve_builtin_kind(name);
+    if ((int)kind == -1) {
+        printf("[Kaoru Syntax Error Line %u]: Unknown builtin directive '@%s'\n", current_tok->line, name);
+        return NULL;
+    }
+
+    *current_tok = next_token(in); // Consumes `@name`
+
+    if (current_tok->type != TOKEN_LPAREN) {
+        printf("[Kaoru Syntax Error Line %u]: Expected '(' after '@%s'\n", current_tok->line, name);
+        return NULL;
+    }
+    *current_tok = next_token(in); // Consumes '('
+
+    ASTNode **args = NULL;
+    int arg_count = 0;
+    int capacity = 0;
+
+    if (current_tok->type != TOKEN_RPAREN) {
+        while (1) {
+            ASTNode *arg = parse_expression(in, current_tok);
+            if (!arg) {
+                for (int i = 0; i < arg_count; i++) free_ast(args[i]);
+                free(args);
+                return NULL;
+            }
+
+            if (arg_count >= capacity) {
+                capacity = (capacity == 0) ? 4 : capacity * 2;
+                ASTNode **new_args = realloc(args, sizeof(ASTNode*) * capacity);
+                if (!new_args) { free(args); exit(1); }
+                args = new_args;
+            }
+            args[arg_count++] = arg;
+
+            if (current_tok->type == TOKEN_COMMA) {
+                *current_tok = next_token(in); // Consumes ','
+            } else {
+                break;
+            }
+        }
+    }
+
+    if (current_tok->type != TOKEN_RPAREN) {
+        printf("[Kaoru Syntax Error Line %u]: Expected ')' after builtin arguments\n", current_tok->line);
+        for (int i = 0; i < arg_count; i++) free_ast(args[i]);
+        free(args);
+        return NULL;
+    }
+    *current_tok = next_token(in); // Consumes ')'
+
+    return create_builtin_node(kind, args, arg_count);
+}
+
 static ASTNode* parse_primary(FILE *in, Token *current_tok) {
+    // Check for '@' System Builtins used inside expressions (e.g. @alloc(10), @open("a.txt", "r"))
+    if (current_tok->value[0] == '@') {
+        const char *name = current_tok->value + 1;
+        if (resolve_builtin_kind(name) != -1) {
+            return parse_builtin_call(in, current_tok);
+        }
+    }
+
     if (current_tok->type == TOKEN_NUMBER) {
         ASTNode *node = create_int_node(atoi(current_tok->value));
         *current_tok = next_token(in); 
@@ -325,10 +448,9 @@ static ASTNode* parse_relational(FILE *in, Token *current_tok) {
         return left;
 }
 
-/* Aligned with paper-1.md Empirical Scope Syntax: { ... }; */
 static ASTNode* parse_statement_or_block(FILE *in, Token *current_tok) {
     if (current_tok->type == TOKEN_LBRACE) {
-        *current_tok = next_token(in); // Consume '{'
+        *current_tok = next_token(in); 
         ASTNode **stmts = NULL;
         int capacity = 0;
         int count = 0;
@@ -349,9 +471,8 @@ static ASTNode* parse_statement_or_block(FILE *in, Token *current_tok) {
         }
         
         if (current_tok->type == TOKEN_RBRACE) {
-            *current_tok = next_token(in); // Consume '}'
+            *current_tok = next_token(in); 
             
-            // Allow optional semicolon to support "{ @int x = 10; };" syntax from the paper
             if (current_tok->type == TOKEN_SEMICOLON) {
                 *current_tok = next_token(in);
             }
@@ -403,10 +524,17 @@ static ASTNode* parse_if_statement(FILE *in, Token *current_tok) {
 
 /* Consolidated Main Statement Router */
 static ASTNode* parse_statement(FILE *in, Token *current_tok) {
+    // 1. Standalone Empirical Scope Block `{ ... };`
+    if (current_tok->type == TOKEN_LBRACE) {
+        return parse_statement_or_block(in, current_tok);
+    }
+
+    // 2. Control Flow: IF
     if (current_tok->type == TOKEN_IF) {
         return parse_if_statement(in, current_tok);
     }
 
+    // 3. Print Directive
     if (current_tok->type == TOKEN_AT_PRINT) {
         *current_tok = next_token(in); 
         ASTNode *expr = parse_expression(in, current_tok);
@@ -418,10 +546,12 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
         return create_print_node(expr);
     }
 
+    // 4. Variable Declarations (@int, @str, @bool)
     if (current_tok->type == TOKEN_AT_INT || 
         current_tok->type == TOKEN_AT_STR || 
         current_tok->type == TOKEN_AT_BOOL) {
         
+        MTokenType var_type = current_tok->type;
         *current_tok = next_token(in); 
         
         if (current_tok->type != TOKEN_IDENTIFIER) {
@@ -452,8 +582,22 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
             return NULL;
         }
 
-        return create_var_decl_node(var_name, expr);
+        return create_var_decl_node(var_type, var_name, expr);
     }
+
+    // 5. System Primitives & Directives (@write, @close, @free, @exit, @panic, etc.)
+    if (current_tok->value[0] == '@') {
+        const char *name = current_tok->value + 1;
+        if (resolve_builtin_kind(name) != -1) {
+            ASTNode *builtin = parse_builtin_call(in, current_tok);
+            if (current_tok->type == TOKEN_SEMICOLON) {
+                *current_tok = next_token(in);
+            }
+            return builtin;
+        }
+    }
+
+    // Legacy / Keyword System Directives
     if (current_tok->type == TOKEN_AT_EXIT) {
         *current_tok = next_token(in);
         ASTNode *expr = parse_expression(in, current_tok);
@@ -466,7 +610,13 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
         if (current_tok->type == TOKEN_SEMICOLON) *current_tok = next_token(in);
         return create_panic_node(expr);
     }
+    if (current_tok->type == TOKEN_AT_SYS) {
+        *current_tok = next_token(in);
+        if (current_tok->type == TOKEN_SEMICOLON) *current_tok = next_token(in);
+        return NULL;
+    }
 
+    // 6. Expression Statement
     ASTNode *expr = parse_relational(in, current_tok);
     if (expr && current_tok->type == TOKEN_SEMICOLON) {
         *current_tok = next_token(in); 
@@ -495,6 +645,7 @@ ASTNode* parse(FILE *in) {
             }
             stmts[count++] = stmt;
         }
+        else { tok = next_token(in); }
     }
-    return create_block_node(stmts, count); // return Root Block 
+    return create_block_node(stmts, count);
 }
