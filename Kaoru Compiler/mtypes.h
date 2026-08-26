@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 /* Bit-flags for Gatekeeper permission control (Permission Bitmask) */
 #define PERM_NONE       0x00
@@ -18,15 +19,16 @@ typedef enum {
     TOKEN_STRING_LIT, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_LPAREN,
     TOKEN_RPAREN, TOKEN_SEMICOLON, TOKEN_ASSIGN, /* '=' */
     TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH,
-    TOKEN_AND, TOKEN_OR, TOKEN_NOT, TOKEN_IF, TOKEN_ELSE, TOKEN_WHILE, TOKEN_RETURN,TOKEN_FOR, TOKEN_COMMA, TOKEN_COLON,
+    TOKEN_AND, TOKEN_OR, TOKEN_NOT, TOKEN_IF, TOKEN_ELSE, TOKEN_WHILE, TOKEN_RETURN, TOKEN_FOR, TOKEN_COMMA, TOKEN_COLON,
     TOKEN_EQ,       /* == */
     TOKEN_NEQ,      /* != */
     TOKEN_LT,       /* < */
     TOKEN_GT,       /* > */
     TOKEN_LTE,      /* <= */
-    TOKEN_GTE       /* >= */
+    TOKEN_GTE,      /* >= */
     TOKEN_AT_EXIT,
-    TOKEN_AT_PANIC
+    TOKEN_AT_PANIC,
+    TOKEN_FUNC
 } MTokenType;
 
 typedef enum { 
@@ -39,47 +41,20 @@ typedef enum {
     NODE_LT,        /* < */
     NODE_GT,        /* > */
     NODE_LTE,       /* <= */
-    NODE_GTE,        /* >= */
+    NODE_GTE,       /* >= */
     NODE_VAR_REF, 
     NODE_WHILE,
-    NODE_FOR
+    NODE_FOR,
+    NODE_FUNC_DECL,
+    NODE_FUNC_CALL,
+    NODE_RETURN,
+    NODE_EXIT,
+    NODE_PANIC,
+    NODE_BUILTIN_CALL
 } ASTNodeType;      
 
 /* Alias NodeType */
 typedef ASTNodeType NodeType;
-
-typedef struct ASTNode {
-    ASTNodeType type;
-    struct ASTNode *for_init;
-    struct ASTNode *for_cond;
-    struct ASTNode *for_post;
-    struct ASTNode *body;
-    int val;
-    char str_val[68];
-    char var_name[32];
-    struct ASTNode *left;
-    struct ASTNode *right;
-    struct ASTNode *cond;         /* condition if */
-    struct ASTNode *then_branch;  /* if true */
-    struct ASTNode *else_branch;  /* if false (else, else if) */
-    struct ASTNode **statements;    
-    int stmt_count;              
-} ASTNode;
-typedef struct ASTArena {
-    ASTNode *nodes;
-    size_t capacity;
-    size_t count;
-} ASTArena;
-typedef struct {
-    MTokenType type;              
-    char value[64];
-    uint32_t line;
-} Token;
-
-typedef struct {
-    uint8_t permissions;  
-    uint64_t hardware_hash; 
-} SecurityContext;
 
 typedef enum {
     BUILTIN_OPEN,
@@ -94,11 +69,56 @@ typedef enum {
 } BuiltinKind;
 
 typedef struct ASTNode {
-    NodeType type; // AST_BUILTIN_CALL
-    BuiltinKind builtin_kind;
+    ASTNodeType type;
+    MTokenType data_type;          /* Variable data type */
+    BuiltinKind builtin_kind;       /* System primitive kind */
+    
+    int val;
+    char str_val[68];
+    char var_name[32];
+    
+    /* Binary & Control Tree Links */
+    struct ASTNode *left;
+    struct ASTNode *right;
+    struct ASTNode *cond;          /* condition for if/while */
+    struct ASTNode *then_branch;   /* if true */
+    struct ASTNode *else_branch;   /* if false */
+
+    /* Loop Structure */
+    struct ASTNode *for_init;
+    struct ASTNode *for_cond;
+    struct ASTNode *for_post;
+    struct ASTNode *for_body;
+    struct ASTNode *body;
+
+    /* Block Statements */
+    struct ASTNode **statements;    
+    int stmt_count;               
+
+    /* Function Declaration & Calls */
+    char **params;
+    int param_count;
+    struct ASTNode *func_body;
     struct ASTNode **args;
     int arg_count;
 } ASTNode;
+
+typedef struct ASTArena {
+    ASTNode *nodes;
+    size_t capacity;
+    size_t count;
+} ASTArena;
+
+typedef struct {
+    MTokenType type;              
+    char value[64];
+    uint32_t line;
+} Token;
+
+typedef struct {
+    uint8_t permissions;  
+    uint64_t hardware_hash; 
+} SecurityContext;
 
 /* Forward Declaration for permission system */
 uint64_t get_hardware_signature(void);

@@ -1,8 +1,8 @@
-// mcodegen.c
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 #include "mtypes.h"
 
 /* =========================================================================
@@ -16,6 +16,10 @@ void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_func_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_return_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+
 static int label_counter = 0;
 static int str_label_counter = 0;
 
@@ -40,7 +44,7 @@ void mlov_print_str(const char *val) {
 /* =========================================================================
  * Cross-Platform Hardware Signature Generator
  * ========================================================================= */
-uint64_t get_hardware_signature() {
+uint64_t get_hardware_signature(void) {
     uint64_t signature = 0;
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
@@ -156,6 +160,10 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             break;
         }
 
+        case NODE_VAR_REF:
+            fprintf(out, "    ; Symbol reference: %s\n", node->var_name);
+            break;
+
         case NODE_ADD:
         case NODE_SUB:
         case NODE_MUL:
@@ -182,6 +190,26 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             generate_if_asm(out, node, sec_ctx);
             break;
 
+        case NODE_WHILE:
+            generate_while_asm(out, node, sec_ctx);
+            break;
+
+        case NODE_FOR:
+            generate_for_asm(out, node, sec_ctx);
+            break;
+
+        case NODE_FUNC_DECL:
+            generate_func_decl_asm(out, node, sec_ctx);
+            break;
+
+        case NODE_FUNC_CALL:
+            generate_func_call_asm(out, node, sec_ctx);
+            break;
+
+        case NODE_RETURN:
+            generate_return_asm(out, node, sec_ctx);
+            break;
+
         case PRINT_NODE:
             generate_print_asm(out, node, sec_ctx);
             break;
@@ -190,20 +218,6 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             generate_builtin_call_asm(out, node, sec_ctx);
             break;
 
-        case NODE_SYS_CHECK:
-            fprintf(out, "    ; --- @sys Verification Trap ---\n");
-            generate_assembly_entry(out, sec_ctx);
-            break;
-        case NODE_IF:
-            generate_if_asm(out, node, sec_ctx);
-            break;
-
-        case NODE_WHILE:
-            generate_while_asm(out, node, sec_ctx);
-            break;
-        case NODE_FOR:
-            generate_for_asm(out, node, sec_ctx);
-            break;
         case NODE_EXIT:
             fprintf(out, "    ; --- @exit Statement ---\n");
             generate_code_from_ast(out, node->left, sec_ctx); 
@@ -235,14 +249,49 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 }
 
 /* =========================================================================
- * Generate Assembly for Builtin Directives (@open, @read, @write, etc.)
+ * Generate Assembly for Function Declarations, Calls & Returns
  * ========================================================================= */
-void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
-    if (!node || node->type != NODE_BUILTIN_CALL) return;
+void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    if (!node || node->type != NODE_FUNC_DECL) return;
 
-    fprintf(out, "    ; --- Directives Call: Builtin %d ---\n", node->builtin_kind);
+    fprintf(out, "\n.global %s\n", node->var_name);
+    fprintf(out, "%s:\n", node->var_name);
 
-    /* Evaluate args and push them onto the stack to preserve order */
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    push rbp\n");
+    fprintf(out, "    mov rbp, rsp\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    stp x29, x30, [sp, #-16]!\n");
+    fprintf(out, "    mov x29, sp\n");
+#endif
+
+    fprintf(out, "    ; Bind parameters (%d count)\n", node->param_count);
+    for (int i = 0; i < node->param_count; i++) {
+        if (i < 6) {
+            fprintf(out, "    ; param [%s] passed via %s\n", node->params[i], ARG_REGS[i]);
+        }
+    }
+
+    if (node->func_body) {
+        generate_code_from_ast(out, node->func_body, sec_ctx);
+    }
+
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    mov rsp, rbp\n");
+    fprintf(out, "    pop rbp\n");
+    fprintf(out, "    ret\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    ldp x29, x30, [sp], #16\n");
+    fprintf(out, "    ret\n");
+#endif
+}
+
+void generate_func_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    if (!node || node->type != NODE_FUNC_CALL) return;
+
+    fprintf(out, "    ; --- Function Call: %s (%d args) ---\n", node->var_name, node->arg_count);
+
+    /* Evaluate args and push onto stack */
     for (int i = 0; i < node->arg_count; i++) {
         generate_code_from_ast(out, node->args[i], sec_ctx);
 #if defined(__x86_64__) || defined(_M_X64)
@@ -263,7 +312,87 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
         }
     }
 
-    /* Target Function Resolution & Security Gate Checks */
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    call %s\n", node->var_name);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    bl %s\n", node->var_name);
+#endif
+}
+
+void generate_return_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    if (!node || node->type != NODE_RETURN) return;
+
+    fprintf(out, "    ; --- Return Statement ---\n");
+    if (node->left) {
+        generate_code_from_ast(out, node->left, sec_ctx);
+    }
+
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    mov rsp, rbp\n");
+    fprintf(out, "    pop rbp\n");
+    fprintf(out, "    ret\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    ldp x29, x30, [sp], #16\n");
+    fprintf(out, "    ret\n");
+#endif
+}
+
+/* =========================================================================
+ * Generate Assembly for Builtin Directives (@open, @read, @write, etc.)
+ * ========================================================================= */
+void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    if (!node || node->type != NODE_BUILTIN_CALL) return;
+
+    fprintf(out, "    ; --- Directives Call: Builtin %d ---\n", node->builtin_kind);
+
+    /* 1. Special Handling: Builtins that do not follow standard C call flow */
+    if (node->builtin_kind == BUILTIN_SIZEOF) {
+        fprintf(out, "    ; Builtin sizeof evaluation\n");
+#if defined(__x86_64__) || defined(_M_X64)
+        fprintf(out, "    mov rax, 8\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        fprintf(out, "    mov x0, #8\n");
+#endif
+        return;
+    }
+
+    if (node->builtin_kind == BUILTIN_PANIC) {
+        if (node->arg_count > 0) {
+            generate_code_from_ast(out, node->args[0], sec_ctx);
+        }
+#if defined(__x86_64__) || defined(_M_X64)
+        fprintf(out, "    mov rdi, rax\n");
+        fprintf(out, "    call mlov_print_str\n");
+        fprintf(out, "    ud2\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        fprintf(out, "    bl mlov_print_str\n");
+        fprintf(out, "    .word 0xd4200000\n");
+#endif
+        return;
+    }
+
+    /* 2. Standard C-Call Builtins: Push arguments */
+    for (int i = 0; i < node->arg_count; i++) {
+        generate_code_from_ast(out, node->args[i], sec_ctx);
+#if defined(__x86_64__) || defined(_M_X64)
+        fprintf(out, "    push rax\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        fprintf(out, "    str x0, [sp, #-16]!\n");
+#endif
+    }
+
+    /* 3. Pop arguments into ABI registers */
+    for (int i = node->arg_count - 1; i >= 0; i--) {
+        if (i < 6) {
+#if defined(__x86_64__) || defined(_M_X64)
+            fprintf(out, "    pop %s\n", ARG_REGS[i]);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+            fprintf(out, "    ldr %s, [sp], #16\n", ARG_REGS[i]);
+#endif
+        }
+    }
+
+    /* 4. Resolve Target Function Name & Security Gate */
     const char *target_func = NULL;
     switch (node->builtin_kind) {
         case BUILTIN_OPEN:
@@ -284,20 +413,12 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
         case BUILTIN_ALLOC:  target_func = "malloc"; break;
         case BUILTIN_FREE:   target_func = "free"; break;
         case BUILTIN_EXIT:   target_func = "exit"; break;
-        case BUILTIN_PANIC:
-#if defined(__x86_64__) || defined(_M_X64)
-            fprintf(out, "    call mlov_print_str\n");
-            fprintf(out, "    ud2\n");
-#elif defined(__aarch64__) || defined(_M_ARM64)
-            fprintf(out, "    bl mlov_print_str\n");
-            fprintf(out, "    .word 0xd4200000\n");
-#endif
-            return;
         default:
             fprintf(out, "    ; Unknown builtin call mapping\n");
             return;
     }
 
+    /* 5. Emit Call Instruction */
     if (target_func) {
 #if defined(__x86_64__) || defined(_M_X64)
         fprintf(out, "    call %s\n", target_func);
@@ -459,6 +580,7 @@ void generate_if_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     fprintf(out, ".L_end_if_%d:\n", cur_id);
     fprintf(out, "    ; --- If Statement End ---\n");
 }
+
 /* =========================================================================
  * Generate Assembly for While Loops
  * ========================================================================= */
@@ -467,8 +589,6 @@ void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 
     int cur_id = label_counter++;
     fprintf(out, "    ; --- While Statement Start ---\n");
-
-  
     fprintf(out, ".L_while_start_%d:\n", cur_id);
 
     generate_code_from_ast(out, node->cond, sec_ctx);
@@ -480,7 +600,6 @@ void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     fprintf(out, "    cbz x0, .L_while_end_%d\n", cur_id);
 #endif
 
-    // 4. code for body loop (then_branch)
     generate_code_from_ast(out, node->then_branch, sec_ctx);
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -489,10 +608,10 @@ void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     fprintf(out, "    b .L_while_start_%d\n", cur_id);
 #endif
 
-
     fprintf(out, ".L_while_end_%d:\n", cur_id);
     fprintf(out, "    ; --- While Statement End ---\n");
 }
+
 /* =========================================================================
  * Generate Assembly for For Loops
  * ========================================================================= */
@@ -502,15 +621,12 @@ void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     int cur_id = label_counter++;
     fprintf(out, "    ; --- For Loop Start ---\n");
 
-    // 1. Execute Initialization Expression (e.g., @int i = 0)
     if (node->for_init) {
         generate_code_from_ast(out, node->for_init, sec_ctx);
     }
 
-    // 2. Loop Start Label
     fprintf(out, ".L_for_start_%d:\n", cur_id);
 
-    // 3. Condition Check (if omitted, treat as true)
     if (node->for_cond) {
         generate_code_from_ast(out, node->for_cond, sec_ctx);
 #if defined(__x86_64__) || defined(_M_X64)
@@ -521,24 +637,20 @@ void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 #endif
     }
 
-    // 4. Loop Body Execution
     if (node->for_body) {
         generate_code_from_ast(out, node->for_body, sec_ctx);
     }
 
-    // 5. Post/Step Increment Execution (e.g., i = i + 1)
     if (node->for_post) {
         generate_code_from_ast(out, node->for_post, sec_ctx);
     }
 
-    // 6. Jump back to condition evaluation
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, "    jmp .L_for_start_%d\n", cur_id);
 #elif defined(__aarch64__) || defined(_M_ARM64)
     fprintf(out, "    b .L_for_start_%d\n", cur_id);
 #endif
 
-    // 7. Loop Exit Label
     fprintf(out, ".L_for_end_%d:\n", cur_id);
     fprintf(out, "    ; --- For Loop End ---\n");
 }
