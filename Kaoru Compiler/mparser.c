@@ -577,6 +577,9 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
     if (current_tok->type == TOKEN_WHILE) {
         return parse_while_statement(in, current_tok);
     }
+    // Control Flow: FOR
+    if (current_tok->type == TOKEN_FOR) {
+        return parse_for_statement(in, current_tok);
     // 3. Print Directive
     if (current_tok->type == TOKEN_AT_PRINT) {
         *current_tok = next_token(in); 
@@ -665,9 +668,54 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
         *current_tok = next_token(in); 
     }
     
+    
     return expr;
 }
+static ASTNode* parse_for_statement(FILE *in, Token *current_tok) {
+    *current_tok = next_token(in); 
+    if (current_tok->type == TOKEN_LPAREN) {
+        *current_tok = next_token(in);
+    } else {
+        printf("[Kaoru Syntax Error Line %u]: Expected '(' after 'for'\n", current_tok->line);
+        return NULL;
+    }
 
+    ASTNode *node = create_ast_node(NODE_FOR);
+
+    // 2. Parse Init (เช่น @int i = 0;) -> parse_statement จะจัดการกิน ';' ในตัว
+    if (current_tok->type != TOKEN_SEMICOLON) {
+        node->for_init = parse_statement(in, current_tok);
+    } else {
+        *current_tok = next_token(in); // skip empty init ';'
+    }
+
+    // 3. Parse Condition (เช่น i < 10;)
+    if (current_tok->type != TOKEN_SEMICOLON) {
+        node->for_cond = parse_expression(in, current_tok);
+    }
+    if (current_tok->type == TOKEN_SEMICOLON) {
+        *current_tok = next_token(in); // skip ';' หลัง condition
+    } else {
+        printf("[Kaoru Syntax Error Line %u]: Expected ';' after for-condition\n", current_tok->line);
+        return NULL;
+    }
+
+    // 4. Parse Post/Increment (เช่น i = i + 1)
+    if (current_tok->type != TOKEN_RPAREN) {
+        node->for_post = parse_expression(in, current_tok);
+    }
+    if (current_tok->type == TOKEN_RPAREN) {
+        *current_tok = next_token(in); // skip ')'
+    } else {
+        printf("[Kaoru Syntax Error Line %u]: Expected ')' after for-step\n", current_tok->line);
+        return NULL;
+    }
+
+    // 5. Parse Body Block { ... }
+    node->for_body = parse_statement_or_block(in, current_tok);
+
+    return node;
+}
 /* Wrapper entry-point parser function */
 ASTNode* parse(FILE *in) {
     Token tok = next_token(in);

@@ -15,6 +15,7 @@ void generate_block_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 static int label_counter = 0;
 static int str_label_counter = 0;
 
@@ -199,6 +200,9 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 
         case NODE_WHILE:
             generate_while_asm(out, node, sec_ctx);
+            break;
+        case NODE_FOR:
+            generate_for_asm(out, node, sec_ctx);
             break;
         case NODE_EXIT:
             fprintf(out, "    ; --- @exit Statement ---\n");
@@ -488,4 +492,53 @@ void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 
     fprintf(out, ".L_while_end_%d:\n", cur_id);
     fprintf(out, "    ; --- While Statement End ---\n");
+}
+/* =========================================================================
+ * Generate Assembly for For Loops
+ * ========================================================================= */
+void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    if (!node || node->type != NODE_FOR) return;
+
+    int cur_id = label_counter++;
+    fprintf(out, "    ; --- For Loop Start ---\n");
+
+    // 1. Execute Initialization Expression (e.g., @int i = 0)
+    if (node->for_init) {
+        generate_code_from_ast(out, node->for_init, sec_ctx);
+    }
+
+    // 2. Loop Start Label
+    fprintf(out, ".L_for_start_%d:\n", cur_id);
+
+    // 3. Condition Check (if omitted, treat as true)
+    if (node->for_cond) {
+        generate_code_from_ast(out, node->for_cond, sec_ctx);
+#if defined(__x86_64__) || defined(_M_X64)
+        fprintf(out, "    cmp rax, 0\n");
+        fprintf(out, "    je .L_for_end_%d\n", cur_id);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        fprintf(out, "    cbz x0, .L_for_end_%d\n", cur_id);
+#endif
+    }
+
+    // 4. Loop Body Execution
+    if (node->for_body) {
+        generate_code_from_ast(out, node->for_body, sec_ctx);
+    }
+
+    // 5. Post/Step Increment Execution (e.g., i = i + 1)
+    if (node->for_post) {
+        generate_code_from_ast(out, node->for_post, sec_ctx);
+    }
+
+    // 6. Jump back to condition evaluation
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    jmp .L_for_start_%d\n", cur_id);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    b .L_for_start_%d\n", cur_id);
+#endif
+
+    // 7. Loop Exit Label
+    fprintf(out, ".L_for_end_%d:\n", cur_id);
+    fprintf(out, "    ; --- For Loop End ---\n");
 }

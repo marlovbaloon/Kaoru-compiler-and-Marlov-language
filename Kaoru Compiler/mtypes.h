@@ -18,7 +18,7 @@ typedef enum {
     TOKEN_STRING_LIT, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_LPAREN,
     TOKEN_RPAREN, TOKEN_SEMICOLON, TOKEN_ASSIGN, /* '=' */
     TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH,
-    TOKEN_AND, TOKEN_OR, TOKEN_NOT, TOKEN_IF, TOKEN_ELSE, TOKEN_WHILE, TOKEN_RETURN,
+    TOKEN_AND, TOKEN_OR, TOKEN_NOT, TOKEN_IF, TOKEN_ELSE, TOKEN_WHILE, TOKEN_RETURN,TOKEN_FOR, TOKEN_COMMA, TOKEN_COLON,
     TOKEN_EQ,       /* == */
     TOKEN_NEQ,      /* != */
     TOKEN_LT,       /* < */
@@ -41,7 +41,8 @@ typedef enum {
     NODE_LTE,       /* <= */
     NODE_GTE,        /* >= */
     NODE_VAR_REF, 
-    NODE_WHILE
+    NODE_WHILE,
+    NODE_FOR
 } ASTNodeType;      
 
 /* Alias NodeType */
@@ -49,6 +50,10 @@ typedef ASTNodeType NodeType;
 
 typedef struct ASTNode {
     ASTNodeType type;
+    struct ASTNode *for_init;
+    struct ASTNode *for_cond;
+    struct ASTNode *for_post;
+    struct ASTNode *body;
     int val;
     char str_val[68];
     char var_name[32];
@@ -57,7 +62,7 @@ typedef struct ASTNode {
     struct ASTNode *cond;         /* condition if */
     struct ASTNode *then_branch;  /* if true */
     struct ASTNode *else_branch;  /* if false (else, else if) */
-    struct ASTNode **statements;  
+    struct ASTNode **statements;    
     int stmt_count;              
 } ASTNode;
 typedef struct ASTArena {
