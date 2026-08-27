@@ -20,6 +20,9 @@ void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_func_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_return_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_unary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_index_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
+void generate_byte_access_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 
 static int label_counter = 0;
 static int str_label_counter = 0;
@@ -183,19 +186,6 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             fprintf(out, "    ; Symbol reference: %s\n", node->var_name);
             break;
 
-        case NODE_ADD:
-        case NODE_SUB:
-        case NODE_MUL:
-        case NODE_DIV:
-        case NODE_EQ:
-        case NODE_NEQ:
-        case NODE_LT:
-        case NODE_GT:
-        case NODE_LTE:
-        case NODE_GTE:
-            generate_binary_op_asm(out, node, sec_ctx);
-            break;
-
         case NODE_VAR_DECL:
             generate_code_from_ast(out, node->left, sec_ctx);
             fprintf(out, "    ; Variable Decl: %s initialized\n", node->var_name);
@@ -247,6 +237,7 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             fprintf(out, "    bl exit\n");
 #endif
             break;
+
         /* Arithmetic & Bitwise Logic */
         case NODE_ADD:
         case NODE_SUB:
@@ -471,80 +462,6 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
 }
 
 /* =========================================================================
- * Generate Assembly for Binary Operations
- * ========================================================================= */
-void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
-    generate_code_from_ast(out, node->right, sec_ctx);
-#if defined(__x86_64__) || defined(_M_X64)
-    fprintf(out, "    push rax\n");
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    fprintf(out, "    str x0, [sp, #-16]!\n");
-#endif
-
-    generate_code_from_ast(out, node->left, sec_ctx);
-
-#if defined(__x86_64__) || defined(_M_X64)
-    fprintf(out, "    pop rbx\n");
-    switch (node->type) {
-        case NODE_ADD: fprintf(out, "    add rax, rbx\n"); break;
-        case NODE_SUB: fprintf(out, "    sub rax, rbx\n"); break;
-        case NODE_MUL: fprintf(out, "    imul rax, rbx\n"); break;
-        case NODE_DIV: 
-            fprintf(out, "    cqo\n");
-            fprintf(out, "    idiv rbx\n"); 
-            break;
-        case NODE_EQ:
-            fprintf(out, "    cmp rax, rbx\n    sete al\n    movzx rax, al\n");
-            break;
-        case NODE_NEQ:
-            fprintf(out, "    cmp rax, rbx\n    setne al\n    movzx rax, al\n");
-            break;
-        case NODE_LT:
-            fprintf(out, "    cmp rax, rbx\n    setl al\n    movzx rax, al\n");
-            break;
-        case NODE_GT:
-            fprintf(out, "    cmp rax, rbx\n    setg al\n    movzx rax, al\n");
-            break;
-        case NODE_LTE:
-            fprintf(out, "    cmp rax, rbx\n    setle al\n    movzx rax, al\n");
-            break;
-        case NODE_GTE:
-            fprintf(out, "    cmp rax, rbx\n    setge al\n    movzx rax, al\n");
-            break;
-        default: break;
-    }
-
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    fprintf(out, "    ldr x1, [sp], #16\n");
-    switch (node->type) {
-        case NODE_ADD: fprintf(out, "    add x0, x0, x1\n"); break;
-        case NODE_SUB: fprintf(out, "    sub x0, x0, x1\n"); break;
-        case NODE_MUL: fprintf(out, "    mul x0, x0, x1\n"); break;
-        case NODE_DIV: fprintf(out, "    sdiv x0, x0, x1\n"); break;
-        case NODE_EQ:
-            fprintf(out, "    cmp x0, x1\n    cset x0, eq\n");
-            break;
-        case NODE_NEQ:
-            fprintf(out, "    cmp x0, x1\n    cset x0, ne\n");
-            break;
-        case NODE_LT:
-            fprintf(out, "    cmp x0, x1\n    cset x0, lt\n");
-            break;
-        case NODE_GT:
-            fprintf(out, "    cmp x0, x1\n    cset x0, gt\n");
-            break;
-        case NODE_LTE:
-            fprintf(out, "    cmp x0, x1\n    cset x0, le\n");
-            break;
-        case NODE_GTE:
-            fprintf(out, "    cmp x0, x1\n    cset x0, ge\n");
-            break;
-        default: break;
-    }
-#endif
-}
-
-/* =========================================================================
  * Generate Assembly for Block Scopes
  * ========================================================================= */
 void generate_block_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
@@ -696,6 +613,7 @@ void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     fprintf(out, ".L_for_end_%d:\n", cur_id);
     fprintf(out, "    ; --- For Loop End ---\n");
 }
+
 /* =========================================================================
  * Generate Assembly for Unary Operations (*p, &x)
  * ========================================================================= */
@@ -799,6 +717,10 @@ void generate_byte_access_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx
 #endif
     }
 }
+
+/* =========================================================================
+ * Generate Assembly for Binary Operations (Arithmetic & Bitwise Logic)
+ * ========================================================================= */
 void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     generate_code_from_ast(out, node->right, sec_ctx);
 #if defined(__x86_64__) || defined(_M_X64)
