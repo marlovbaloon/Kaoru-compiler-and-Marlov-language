@@ -28,7 +28,44 @@ typedef enum {
     IR_LOAD_BYTE,      /* t1 = (uint8_t)*p              */
     IR_STORE_BYTE      /* *(uint8_t*)p = t1             */
 } IROpcode;
-
+typedef enum {
+    NODE_BLOCK,
+    NODE_VAR_DECL,
+    NODE_VAR_REF,
+    NODE_ASSIGN,
+    NODE_BINOP,
+    NODE_IF,
+    NODE_WHILE,
+    NODE_BREAK,
+    NODE_RETURN,
+    NODE_ADDR_OF,
+    NODE_DEREF,
+    NODE_CALL,
+    NODE_LITERAL
+} ASTNodeType;
+typedef struct ASTNode {
+    ASTNodeType type;
+    char name[64];
+    int int_val;
+    char op[4];
+    
+    struct ASTNode **children;
+    size_t child_count;
+    
+    struct ASTNode **args;
+    size_t arg_count;
+    
+    struct ASTNode *left;
+    struct ASTNode *right;
+    struct ASTNode *target;
+    struct ASTNode *val;
+    struct ASTNode *cond;
+    struct ASTNode *then_block;
+    struct ASTNode *else_block;
+    struct ASTNode *body;
+    
+    int var_size;
+} ASTNode;
 typedef struct IRInstruction {
     IROpcode op;
     char target[32];   /* Variable name or Temporary register */

@@ -1,29 +1,35 @@
-// mir.c 
+// mir.c - Lowering AST to MIR (Medium-level Intermediate Representation)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "mir.h"
 
-#define MAX_SCOPE_DEPTH 64
-
-typedef struct {
-    size_t scope_stack[MAX_SCOPE_DEPTH];
-    int scope_depth;
-    char current_break_label[32];
-    char current_continue_label[32];
-} LoweringContext;
-
-static size_t get_total_active_stack_bytes(LoweringContext *ctx) {
-    size_t total = 0;
-    for (int i = 0; i < ctx->scope_depth; i++) {
-        total += ctx->scope_stack[i];
-    }
-    return total;
+/* Formula 2: Hardware 8-Byte Alignment Operator */
+size_t align8(size_t x) {
+    return (x + 7) & ~((size_t)7);
 }
 
-static IRInstruction* create_ir_inst(IROpcode op) {
+/* Formula 3: Frame Allocation Metric Function */
+size_t size_of_scope(ASTNode *block) {
+    if (!block || block->type != NODE_BLOCK) {
+        return 0;
+    }
+    size_t total_size = 0;
+    for (size_t i = 0; i < block->child_count; i++) {
+        ASTNode *child = block->children[i];
+        if (child->type == NODE_VAR_DECL) {
+            total_size += (child->var_size > 0) ? (size_t)child->var_size : 8;
+        }
+    }
+    return align8(total_size);
+}
+
+static IRInstruction *create_ir_inst(IROpcode op) {
     IRInstruction *inst = (IRInstruction *)calloc(1, sizeof(IRInstruction));
-    if (!inst) exit(1);
+    if (!inst) {
+        fprintf(stderr, "Error: Memory allocation failed for IRInstruction\n");
+        exit(EXIT_FAILURE);
+    }
     inst->op = op;
     return inst;
 }
@@ -38,222 +44,258 @@ static void append_inst(IRProgram *prog, IRInstruction *inst) {
     }
 }
 
-static void new_temp(IRProgram *prog, char *out_temp, size_t max_len) {
-    snprintf(out_temp, max_len, "t%d", prog->temp_count++);
+static void new_temp(IRProgram *prog, char *out_buf, size_t buf_size) {
+    snprintf(out_buf, buf_size, "t%d", prog->temp_count++);
 }
 
-static void new_label(IRProgram *prog, char *out_label, size_t max_len) {
-    snprintf(out_label, max_len, "L%d", prog->label_count++);
+static void new_label(IRProgram *prog, const char *prefix, char *out_buf, size_t buf_size) {
+    snprintf(out_buf, buf_size, "%s_%d", prefix, prog->label_count++);
 }
 
-static size_t calculate_scope_size(ASTNode *node) {
-    if (!node) return 0;
-    
-    size_t raw_size = 0;
-    if (node->type == NODE_VAR_DECL) {
-        /* Default to 8 bytes for 64-bit pointers/scalars in self-hosting */
-        raw_size += 8; 
-    } else if (node->type == NODE_BLOCK) {
-        for (int i = 0; i < node->stmt_count; i++) {
-            raw_size += calculate_scope_size(node->statements[i]);
-        }
-    } else if (node->type == NODE_IF) {
-        raw_size += calculate_scope_size(node->then_branch);
-        if (node->else_branch) {
-            raw_size += calculate_scope_size(node->else_branch);
-        }
-    }
-    return raw_size;
-}
-
-static void lower_ast_rec(ASTNode *node, IRProgram *prog, LoweringContext *ctx, int *current_offset, char *out_target, size_t out_size) {
-    if (!node) {
-        if (out_target && out_size > 0) out_target[0] = '\0';
-        return;
-    }
+/* Operational Semantics State Transition Lowering */
+void lower_ast_node(ASTNode *node, IRProgram *prog, ScopeContext *ctx, int32_t *current_offset, char *out_target, size_t target_size) {
+    if (!node) return;
 
     switch (node->type) {
-        case NODE_BLOCK: {
-            size_t raw_size = calculate_scope_size(node);
-            size_t aligned_scope_size = align8(raw_size);
 
-            if (ctx->scope_depth < MAX_SCOPE_DEPTH) {
-                ctx->scope_stack[ctx->scope_depth++] = aligned_scope_size;
-            }
+    /* Formula 4 & Theorem 1: Scope Block Handling with Stack Invariant */
+    case NODE_BLOCK: {
+        int32_t scope_size = (int32_t)size_of_scope(node);
+        int32_t saved_offset = *current_offset;
 
-            IRInstruction *enter = create_ir_inst(IR_ENTER_SCOPE);
-            enter->imm_val = (int)aligned_scope_size;
-            append_inst(prog, enter);
+        /* [E-ENTER] Rule: Allocate frame */
+        IRInstruction *enter = create_ir_inst(IR_ENTER_SCOPE);
+        enter->stack_offset = scope_size;
+        append_inst(prog, enter);
 
-            int local_offset_tracker = 0;
-            for (int i = 0; i < node->stmt_count; i++) {
-                lower_ast_rec(node->statements[i], prog, ctx, &local_offset_tracker, NULL, 0);
-            }
-
-            IRInstruction *exit_inst = create_ir_inst(IR_EXIT_SCOPE);
-            exit_inst->imm_val = (int)aligned_scope_size;
-            append_inst(prog, exit_inst);
-
-            if (ctx->scope_depth > 0) {
-                ctx->scope_depth--;
-            }
-            if (out_target && out_size > 0) out_target[0] = '\0';
-            break;
+        /* [E-EXEC] Rule: Process statements sequentially inside scope bound */
+        for (size_t i = 0; i < node->child_count; i++) {
+            lower_ast_node(node->children[i], prog, ctx, current_offset, NULL, 0);
         }
 
-        case NODE_RETURN: {
-            if (node->left) {
-                char ret_sym[32] = {0};
-                lower_ast_rec(node->left, prog, ctx, current_offset, ret_sym, sizeof(ret_sym));
-            }
+        /* [E-EXIT] Rule: Restore stack pointer to preserve invariant sp_exit = sp0 */
+        IRInstruction *exit_inst = create_ir_inst(IR_EXIT_SCOPE);
+        exit_inst->stack_offset = scope_size;
+        append_inst(prog, exit_inst);
 
-            size_t unwind_bytes = get_total_active_stack_bytes(ctx);
-            if (unwind_bytes > 0) {
-                IRInstruction *unwind = create_ir_inst(IR_EXIT_SCOPE);
-                unwind->imm_val = (int)unwind_bytes;
-                append_inst(prog, unwind);
-            }
+        *current_offset = saved_offset;
+        break;
+    }
 
-            IRInstruction *ret = create_ir_inst(IR_RETURN);
-            append_inst(prog, ret);
-            break;
+    /* Lemma 2: Scope Memory Isolation Bound Variable Allocation */
+    case NODE_VAR_DECL: {
+        int v_size = (node->var_size > 0) ? node->var_size : 8;
+        *current_offset += v_size;
+
+        IRInstruction *decl = create_ir_inst(IR_VAR_DECL);
+        strncpy(decl->target, node->name, sizeof(decl->target) - 1);
+        decl->stack_offset = *current_offset;
+        append_inst(prog, decl);
+        break;
+    }
+
+    case NODE_VAR_REF: {
+        if (out_target && target_size > 0) {
+            strncpy(out_target, node->name, target_size - 1);
         }
+        break;
+    }
 
-        case NODE_BREAK: {
-            size_t unwind_bytes = get_total_active_stack_bytes(ctx);
-            if (unwind_bytes > 0) {
-                IRInstruction *unwind = create_ir_inst(IR_EXIT_SCOPE);
-                unwind->imm_val = (int)unwind_bytes;
-                append_inst(prog, unwind);
-            }
+    case NODE_LITERAL: {
+        if (out_target && target_size > 0) {
+            new_temp(prog, out_target, target_size);
+            IRInstruction *assign = create_ir_inst(IR_ASSIGN);
+            strncpy(assign->target, out_target, sizeof(assign->target) - 1);
+            assign->imm_val = node->int_val;
+            append_inst(prog, assign);
+        }
+        break;
+    }
+
+    case NODE_ASSIGN: {
+        char val_target[32] = {0};
+        lower_ast_node(node->val, prog, ctx, current_offset, val_target, sizeof(val_target));
+
+        if (node->target->type == NODE_DEREF) {
+            /* Pointer dereference store: *ptr = val */
+            char ptr_target[32] = {0};
+            lower_ast_node(node->target->val, prog, ctx, current_offset, ptr_target, sizeof(ptr_target));
+
+            IRInstruction *store = create_ir_inst(IR_STORE_PTR);
+            strncpy(store->target, ptr_target, sizeof(store->target) - 1);
+            strncpy(store->arg1, val_target, sizeof(store->arg1) - 1);
+            append_inst(prog, store);
+        } else {
+            /* Standard assignment: var = val */
+            IRInstruction *assign = create_ir_inst(IR_ASSIGN);
+            strncpy(assign->target, node->target->name, sizeof(assign->target) - 1);
+            strncpy(assign->arg1, val_target, sizeof(assign->arg1) - 1);
+            append_inst(prog, assign);
+        }
+        break;
+    }
+
+    case NODE_BINOP: {
+        char left_target[32] = {0};
+        char right_target[32] = {0};
+        lower_ast_node(node->left, prog, ctx, current_offset, left_target, sizeof(left_target));
+        lower_ast_node(node->right, prog, ctx, current_offset, right_target, sizeof(right_target));
+
+        if (out_target && target_size > 0) {
+            new_temp(prog, out_target, target_size);
+            IROpcode op = IR_ADD;
+            if (strcmp(node->op, "-") == 0) op = IR_SUB;
+            else if (strcmp(node->op, "*") == 0) op = IR_MUL;
+            else if (strcmp(node->op, "/") == 0) op = IR_DIV;
+
+            IRInstruction *bin = create_ir_inst(op);
+            strncpy(bin->target, out_target, sizeof(bin->target) - 1);
+            strncpy(bin->arg1, left_target, sizeof(bin->arg1) - 1);
+            strncpy(bin->arg2, right_target, sizeof(right_target) - 1);
+            append_inst(prog, bin);
+        }
+        break;
+    }
+
+    /* Small-step Deterministic Control Flow */
+    case NODE_IF: {
+        char cond_target[32] = {0};
+        char label_else[32] = {0};
+        char label_end[32] = {0};
+
+        new_label(prog, "L_else", label_else, sizeof(label_else));
+        new_label(prog, "L_end", label_end, sizeof(label_end));
+
+        lower_ast_node(node->cond, prog, ctx, current_offset, cond_target, sizeof(cond_target));
+
+        IRInstruction *br = create_ir_inst(IR_JUMP_IF_FALSE);
+        strncpy(br->arg1, cond_target, sizeof(br->arg1) - 1);
+        strncpy(br->target, node->else_block ? label_else : label_end, sizeof(br->target) - 1);
+        append_inst(prog, br);
+
+        lower_ast_node(node->then_block, prog, ctx, current_offset, NULL, 0);
+
+        if (node->else_block) {
             IRInstruction *jmp = create_ir_inst(IR_JUMP);
-            strncpy(jmp->target, ctx->current_break_label, sizeof(jmp->target) - 1);
+            strncpy(jmp->target, label_end, sizeof(jmp->target) - 1);
             append_inst(prog, jmp);
-            break;
+
+            IRInstruction *lbl_else = create_ir_inst(IR_LABEL);
+            strncpy(lbl_else->target, label_else, sizeof(lbl_else->target) - 1);
+            append_inst(prog, lbl_else);
+
+            lower_ast_node(node->else_block, prog, ctx, current_offset, NULL, 0);
         }
 
-        case NODE_INT: {
-            new_temp(prog, out_target, out_size);
-            IRInstruction *inst = create_ir_inst(IR_ASSIGN);
-            strncpy(inst->target, out_target, sizeof(inst->target) - 1);
-            inst->imm_val = node->val;
-            append_inst(prog, inst);
-            break;
-        }
-
-        case NODE_ADD:
-        case NODE_SUB:
-        case NODE_MUL:
-        case NODE_DIV: {
-            char left_sym[32] = {0};
-            char right_sym[32] = {0};
-
-            lower_ast_rec(node->left, prog, ctx, current_offset, left_sym, sizeof(left_sym));
-            lower_ast_rec(node->right, prog, ctx, current_offset, right_sym, sizeof(right_sym));
-
-            new_temp(prog, out_target, out_size);
-            IROpcode op = (node->type == NODE_ADD) ? IR_ADD :
-                          (node->type == NODE_SUB) ? IR_SUB :
-                          (node->type == NODE_MUL) ? IR_MUL : IR_DIV;
-
-            IRInstruction *inst = create_ir_inst(op);
-            strncpy(inst->target, out_target, sizeof(inst->target) - 1);
-            strncpy(inst->arg1, left_sym, sizeof(inst->arg1) - 1);
-            strncpy(inst->arg2, right_sym, sizeof(inst->arg2) - 1);
-            append_inst(prog, inst);
-            break;
-        }
-
-        case NODE_VAR_DECL: {
-            char val_sym[32] = {0};
-            if (node->left) {
-                lower_ast_rec(node->left, prog, ctx, current_offset, val_sym, sizeof(val_sym));
-            }
-
-            IRInstruction *inst = create_ir_inst(IR_VAR_DECL);
-            strncpy(inst->target, node->var_name, sizeof(inst->target) - 1);
-            strncpy(inst->arg1, val_sym, sizeof(inst->arg1) - 1);
-
-            if (current_offset) {
-                inst->stack_offset = *current_offset;
-                *current_offset += 8; /* Alignment for 64-bit stack slots */
-            }
-            append_inst(prog, inst);
-            
-            if (out_target && out_size > 0) out_target[0] = '\0';
-            break;
-        }
-
-        case NODE_IF: {
-            char else_label[32], end_label[32], cond_sym[32] = {0};
-            new_label(prog, else_label, sizeof(else_label));
-            new_label(prog, end_label, sizeof(end_label));
-
-            lower_ast_rec(node->cond, prog, ctx, current_offset, cond_sym, sizeof(cond_sym));
-
-            IRInstruction *jif = create_ir_inst(IR_JUMP_IF_FALSE);
-            strncpy(jif->arg1, cond_sym, sizeof(jif->arg1) - 1);
-            strncpy(jif->target, node->else_branch ? else_label : end_label, sizeof(jif->target) - 1);
-            append_inst(prog, jif);
-
-            lower_ast_rec(node->then_branch, prog, ctx, current_offset, NULL, 0);
-
-            if (node->else_branch) {
-                IRInstruction *jmp = create_ir_inst(IR_JUMP);
-                strncpy(jmp->target, end_label, sizeof(jmp->target) - 1);
-                append_inst(prog, jmp);
-
-                IRInstruction *lbl_else = create_ir_inst(IR_LABEL);
-                strncpy(lbl_else->target, else_label, sizeof(lbl_else->target) - 1);
-                append_inst(prog, lbl_else);
-
-                lower_ast_rec(node->else_branch, prog, ctx, current_offset, NULL, 0);
-            }
-
-            IRInstruction *lbl_end = create_ir_inst(IR_LABEL);
-            strncpy(lbl_end->target, end_label, sizeof(lbl_end->target) - 1);
-            append_inst(prog, lbl_end);
-
-            if (out_target && out_size > 0) out_target[0] = '\0';
-            break;
-        }
-
-        case PRINT_NODE: {
-            char val_sym[32] = {0};
-            lower_ast_rec(node->left, prog, ctx, current_offset, val_sym, sizeof(val_sym));
-            
-            IRInstruction *inst = create_ir_inst(IR_PRINT);
-            strncpy(inst->arg1, val_sym, sizeof(inst->arg1) - 1);
-            append_inst(prog, inst);
-
-            if (out_target && out_size > 0) out_target[0] = '\0';
-            break;
-        }
-
-        default:
-            if (out_target && out_size > 0) out_target[0] = '\0';
-            break;
+        IRInstruction *lbl_end = create_ir_inst(IR_LABEL);
+        strncpy(lbl_end->target, label_end, sizeof(lbl_end->target) - 1);
+        append_inst(prog, lbl_end);
+        break;
     }
-}
 
-IRProgram* generate_ir(ASTNode *root) {
-    IRProgram *prog = (IRProgram *)calloc(1, sizeof(IRProgram));
-    if (!prog) exit(1);
-    
-    LoweringContext ctx = {0};
-    int root_offset = 0;
-    char root_target[32] = {0};
-    lower_ast_rec(root, prog, &ctx, &root_offset, root_target, sizeof(root_target));
-    return prog;
-}
+    case NODE_WHILE: {
+        char label_start[32] = {0};
+        char label_end[32] = {0};
+        char cond_target[32] = {0};
 
-void free_ir(IRProgram *ir) {
-    if (!ir) return;
-    IRInstruction *curr = ir->head;
-    while (curr) {
-        IRInstruction *next = curr->next;
-        free(curr);
-        curr = next;
+        new_label(prog, "L_loop_start", label_start, sizeof(label_start));
+        new_label(prog, "L_loop_end", label_end, sizeof(label_end));
+
+        IRInstruction *lbl_start = create_ir_inst(IR_LABEL);
+        strncpy(lbl_start->target, label_start, sizeof(lbl_start->target) - 1);
+        append_inst(prog, lbl_start);
+
+        lower_ast_node(node->cond, prog, ctx, current_offset, cond_target, sizeof(cond_target));
+
+        IRInstruction *br = create_ir_inst(IR_JUMP_IF_FALSE);
+        strncpy(br->arg1, cond_target, sizeof(br->arg1) - 1);
+        strncpy(br->target, label_end, sizeof(br->target) - 1);
+        append_inst(prog, br);
+
+        ScopeContext loop_ctx;
+        strncpy(loop_ctx.break_label, label_end, sizeof(loop_ctx.break_label) - 1);
+        loop_ctx.parent = ctx;
+
+        lower_ast_node(node->body, prog, &loop_ctx, current_offset, NULL, 0);
+
+        IRInstruction *jmp = create_ir_inst(IR_JUMP);
+        strncpy(jmp->target, label_start, sizeof(jmp->target) - 1);
+        append_inst(prog, jmp);
+
+        IRInstruction *lbl_end = create_ir_inst(IR_LABEL);
+        strncpy(lbl_end->target, label_end, sizeof(lbl_end->target) - 1);
+        append_inst(prog, lbl_end);
+        break;
     }
-    free(ir);
+
+    case NODE_BREAK: {
+        if (ctx && ctx->break_label[0] != '\0') {
+            IRInstruction *jmp = create_ir_inst(IR_JUMP);
+            strncpy(jmp->target, ctx->break_label, sizeof(jmp->target) - 1);
+            append_inst(prog, jmp);
+        }
+        break;
+    }
+
+    case NODE_RETURN: {
+        char ret_target[32] = {0};
+        if (node->val) {
+            lower_ast_node(node->val, prog, ctx, current_offset, ret_target, sizeof(ret_target));
+        }
+        IRInstruction *ret = create_ir_inst(IR_RETURN);
+        strncpy(ret->arg1, ret_target, sizeof(ret->arg1) - 1);
+        append_inst(prog, ret);
+        break;
+    }
+
+    /* Self-Hosting Primitives: Pointer Operations & Calls */
+    case NODE_ADDR_OF: {
+        if (out_target && target_size > 0) {
+            new_temp(prog, out_target, target_size);
+            IRInstruction *addr = create_ir_inst(IR_ADDR_OF);
+            strncpy(addr->target, out_target, sizeof(addr->target) - 1);
+            strncpy(addr->arg1, node->val->name, sizeof(addr->arg1) - 1);
+            append_inst(prog, addr);
+        }
+        break;
+    }
+
+    case NODE_DEREF: {
+        char ptr_target[32] = {0};
+        lower_ast_node(node->val, prog, ctx, current_offset, ptr_target, sizeof(ptr_target));
+
+        if (out_target && target_size > 0) {
+            new_temp(prog, out_target, target_size);
+            IRInstruction *load = create_ir_inst(IR_LOAD_PTR);
+            strncpy(load->target, out_target, sizeof(load->target) - 1);
+            strncpy(load->arg1, ptr_target, sizeof(load->arg1) - 1);
+            append_inst(prog, load);
+        }
+        break;
+    }
+
+    case NODE_CALL: {
+        for (size_t i = 0; i < node->arg_count; i++) {
+            char arg_target[32] = {0};
+            lower_ast_node(node->args[i], prog, ctx, current_offset, arg_target, sizeof(arg_target));
+            
+            IRInstruction *param = create_ir_inst(IR_PARAM);
+            strncpy(param->arg1, arg_target, sizeof(param->arg1) - 1);
+            append_inst(prog, param);
+        }
+
+        if (out_target && target_size > 0) {
+            new_temp(prog, out_target, target_size);
+        }
+
+        IRInstruction *call = create_ir_inst(IR_CALL);
+        if (out_target && target_size > 0) {
+            strncpy(call->target, out_target, sizeof(call->target) - 1);
+        }
+        strncpy(call->arg1, node->name, sizeof(call->arg1) - 1);
+        call->imm_val = (int32_t)node->arg_count;
+        append_inst(prog, call);
+        break;
+    }
+    }
 }
