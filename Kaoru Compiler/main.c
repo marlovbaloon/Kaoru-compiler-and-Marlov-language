@@ -18,6 +18,18 @@ static void print_usage(const char *prog_name) {
     printf("Usage: %s <source.ml> [-include <header.mlov>] [-o <output>]\n", prog_name);
 }
 
+/* Helper function to free Symbol Table memory */
+static void cleanup_symbol_table(SymbolTable *symtab) {
+    if (!symtab) return;
+    SymbolNode *curr = symtab->head;
+    while (curr) {
+        SymbolNode *next = curr->next;
+        free(curr); // Clean up symbol node allocations
+        curr = next;
+    }
+    symtab->head = NULL;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         run_interactive_cli();
@@ -58,6 +70,7 @@ int main(int argc, char *argv[]) {
     if (header_file) {
         printf("[Kaoru Compiler]: Loading Header '%s'...\n", header_file);
         if (!parse_mlov_header(header_file, &symtab, &sec_ctx)) {
+            cleanup_symbol_table(&symtab);
             return 1;
         }
     }
@@ -66,6 +79,7 @@ int main(int argc, char *argv[]) {
     FILE *source = fopen(source_file, "r");
     if (!source) {
         printf("[Kaoru Fatal Error]: Cannot open source file '%s'\n", source_file);
+        cleanup_symbol_table(&symtab);
         return 1;
     }
 
@@ -78,6 +92,7 @@ int main(int argc, char *argv[]) {
     if (!file_out) {
         printf("[Kaoru Fatal Error]: Cannot open output file '%s'\n", output_file);
         if (root) free_ast(root);
+        cleanup_symbol_table(&symtab);
         return 1;
     }
 
@@ -92,6 +107,9 @@ int main(int argc, char *argv[]) {
     fclose(file_out);
     printf("[Kaoru Compiler]: Successfully compiled '%s' using symbols from '%s' -> '%s'\n", 
            source_file, header_file ? header_file : "N/A", output_file);
+
+    /* Free symbol table before normal exit */
+    cleanup_symbol_table(&symtab);
 
     return 0;
 }
