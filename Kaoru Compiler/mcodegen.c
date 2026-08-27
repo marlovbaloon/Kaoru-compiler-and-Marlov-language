@@ -1,3 +1,4 @@
+// mcodegen.c - Marlov Compiler Code Generation Module
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -23,6 +24,21 @@ void generate_return_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 static int label_counter = 0;
 static int str_label_counter = 0;
 
+void emit_symbol_linkage(FILE *out, SymbolTable *symtab) {
+    if (!symtab) return;
+    Symbol *curr = symtab->head;
+    while (curr) {
+        if (curr->is_declared && !curr->is_defined) {
+            /* Declared in .mlov but not defined in this .ml -> Mark as EXTERN for Assembly */
+            fprintf(out, "    .extern %s\n", curr->name);
+        } else if (curr->is_defined) {
+            /* Defined in this .ml -> Export as GLOBAL */
+            fprintf(out, "    .global %s\n", curr->name);
+        }
+        curr = curr->next;
+    }
+}
+
 /* Registers for ABI argument passing */
 #if defined(__x86_64__) || defined(_M_X64)
 static const char *ARG_REGS[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
@@ -42,7 +58,7 @@ void mlov_print_str(const char *val) {
 }
 
 /* =========================================================================
- * Cross-Platform Hardware Signature Generator
+ * Cross-Platform Hardware Signature Generator (Host/Target Helper)
  * ========================================================================= */
 uint64_t get_hardware_signature(void) {
     uint64_t signature = 0;
@@ -81,20 +97,24 @@ uint64_t get_hardware_signature(void) {
 }
 
 /* =========================================================================
- * Security Gatekeeper Assembly Output
+ * Security Gatekeeper Assembly Output (Target Binary Routine)
  * ========================================================================= */
 void generate_runtime_header(FILE *out, SecurityContext *sec_ctx) {
-    fprintf(out, "// --- KAORU RUNTIME SECURITY GUARD ---\n");
+    fprintf(out, "// --- KAORU RUNTIME SECURITY GUARD (EMBEDDED IN TARGET BINARY) ---\n");
     fprintf(out, "#include <stdio.h>\n");
     fprintf(out, "#include <stdlib.h>\n");
     fprintf(out, "#include <stdbool.h>\n\n");
-    fprintf(out, "static const unsigned long long AUTHORIZED_HARDWARE_HASH = 0x%llXULL;\n", 
-            (unsigned long long)sec_ctx->hardware_hash);
-    fprintf(out, "static const bool HAS_DISK_READ_PERM = %s;\n\n", 
-            (sec_ctx->permissions & PERM_DISK_READ) ? "true" : "false");
+    
+    if (sec_ctx) {
+        fprintf(out, "static const unsigned long long AUTHORIZED_HARDWARE_HASH = 0x%llXULL;\n", 
+                (unsigned long long)sec_ctx->hardware_hash);
+        fprintf(out, "static const bool HAS_DISK_READ_PERM = %s;\n\n", 
+                (sec_ctx->permissions & PERM_DISK_READ) ? "true" : "false");
+    }
+
     fprintf(out, "void verify_hardware_and_permissions() {\n");
     fprintf(out, "    unsigned long long current_cpuid = get_hardware_signature();\n");
-    fprintf(out, "    if (current_cpuid != AUTHORIZED_HARDWARE_HASH) {\n");
+    fprintf(out, "    if (AUTHORIZED_HARDWARE_HASH != 0 && current_cpuid != AUTHORIZED_HARDWARE_HASH) {\n");
     fprintf(out, "        printf(\"[Marlov Runtime Error]: Hardware signature mismatch! Unauthorized device.\\n\");\n");
     fprintf(out, "        exit(137);\n");
     fprintf(out, "    }\n");
@@ -102,23 +122,22 @@ void generate_runtime_header(FILE *out, SecurityContext *sec_ctx) {
 }
 
 void generate_assembly_entry(FILE *out, SecurityContext *ctx) {
+    (void)ctx; /* Unused here: No longer trap during compilation */
+
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, ".global main\n");
     fprintf(out, "main:\n");
     fprintf(out, "    push rbp\n");
     fprintf(out, "    mov rbp, rsp\n");
-    if (ctx && !(ctx->permissions & PERM_DISK_READ)) {
-        fprintf(out, "    ; Security Violation Trap\n");
-        fprintf(out, "    ud2\n");
-    }
+    fprintf(out, "    ; Optional: Call Runtime Hardware Guard Check\n");
+    fprintf(out, "    ; call verify_hardware_and_permissions\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
     fprintf(out, ".global main\n");
     fprintf(out, "main:\n");
     fprintf(out, "    stp x29, x30, [sp, #-16]!\n");
     fprintf(out, "    mov x29, sp\n");
-    if (ctx && !(ctx->permissions & PERM_DISK_READ)) {
-        fprintf(out, "    .word 0xd4200000 ; BRK trap\n");
-    }
+    fprintf(out, "    ; Optional: Call Runtime Hardware Guard Check\n");
+    fprintf(out, "    ; bl verify_hardware_and_permissions\n");
 #endif
 }
 
@@ -392,21 +411,10 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
         }
     }
 
-    /* 4. Resolve Target Function Name & Security Gate */
+    /* 4. Resolve Target Function Name */
     const char *target_func = NULL;
     switch (node->builtin_kind) {
-        case BUILTIN_OPEN:
-            if (sec_ctx && !(sec_ctx->permissions & PERM_DISK_READ)) {
-                fprintf(out, "    ; Security Trap: Unauthorized @open invocation\n");
-#if defined(__x86_64__) || defined(_M_X64)
-                fprintf(out, "    ud2\n");
-#elif defined(__aarch64__) || defined(_M_ARM64)
-                fprintf(out, "    .word 0xd4200000\n");
-#endif
-                return;
-            }
-            target_func = "fopen";
-            break;
+        case BUILTIN_OPEN:   target_func = "fopen"; break;
         case BUILTIN_READ:   target_func = "fread"; break;
         case BUILTIN_WRITE:  target_func = "fwrite"; break;
         case BUILTIN_CLOSE:  target_func = "fclose"; break;

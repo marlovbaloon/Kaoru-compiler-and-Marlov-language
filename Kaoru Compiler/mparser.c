@@ -15,7 +15,26 @@ static ASTNode* parse_for_statement(FILE *in, Token *current_tok);
 static ASTNode* parse_func_decl(FILE *in, Token *current_tok);
 
 static ASTArena global_arena = {NULL, 0, 0};
+static void register_symbol(SymbolTable *symtab, const char *name, SymbolKind kind, bool is_declared, bool is_defined) {
+    /* Check duplicate */
+    Symbol *curr = symtab->head;
+    while (curr) {
+        if (strcmp(curr->name, name) == 0) {
+            if (is_defined) curr->is_defined = true;
+            return;
+        }
+        curr = curr->next;
+    }
 
+    /* Create new symbol */
+    Symbol *sym = (Symbol *)malloc(sizeof(Symbol));
+    strncpy(sym->name, name, sizeof(sym->name) - 1);
+    sym->kind = kind;
+    sym->is_declared = is_declared;
+    sym->is_defined = is_defined;
+    sym->next = symtab->head;
+    symtab->head = sym;
+}
 void init_ast_arena(size_t initial_capacity) {
     global_arena.nodes = (ASTNode *)malloc(sizeof(ASTNode) * initial_capacity);
     global_arena.capacity = initial_capacity;
@@ -268,7 +287,36 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
 /* =========================================================================
  * Expression & Statement Recursive Descent Parser
  * ========================================================================= */
+/* Parse .mlov files to collect interface/function declarations */
+bool parse_mlov_header(const char *mlov_path, SymbolTable *symtab, SecurityContext *sec_ctx) {
+    FILE *f = fopen(mlov_path, "r");
+    if (!f) {
+        printf("[Parser Error]: Cannot open header file '%s'\n", mlov_path);
+        return false;
+    }
 
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        /* Simple Lexing/Parsing logic for .mlov header prototypes */
+        /* Example syntax in .mlov: "decl fn my_func();" */
+        char sym_name[64];
+        if (sscanf(line, "decl fn %63s", sym_name) == 1) {
+            register_symbol(symtab, sym_name, SYM_FUNCTION, true, false);
+        }
+    }
+
+    fclose(f);
+    return true;
+}
+/* Main AST Parser extending support for symbol table matching */
+ASTNode *parse_with_symbols(FILE *in, SymbolTable *symtab) {
+    /* 
+     * Implement your AST Parsing loop here.
+     * When encountering function implementations in .ml, 
+     * call: register_symbol(symtab, func_name, SYM_FUNCTION, true, true);
+     */
+    return NULL; /* Return root ASTNode */
+}
 static ASTNode* parse_builtin_call(FILE *in, Token *current_tok) {
     const char *name = current_tok->value;
     if (name[0] == '@') name++;

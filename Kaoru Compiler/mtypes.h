@@ -115,6 +115,23 @@ typedef struct {
     uint32_t line;
 } Token;
 
+typedef enum {
+    SYM_FUNCTION,
+    SYM_VARIABLE
+} SymbolKind;
+
+typedef struct Symbol {
+    char name[64];
+    SymbolKind kind;
+    bool is_declared;  /* True if loaded from .mlov */
+    bool is_defined;   /* True if body implemented in .ml */
+    struct Symbol *next;
+} Symbol;
+
+typedef struct {
+    Symbol *head;
+} SymbolTable;
+
 typedef struct {
     uint8_t permissions;  
     uint64_t hardware_hash; 
