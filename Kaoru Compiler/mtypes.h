@@ -1,4 +1,4 @@
-//mtypes.h
+// mtypes.h
 #ifndef MTYPES_H
 #define MTYPES_H
 
@@ -28,7 +28,20 @@ typedef enum {
     TOKEN_GTE,      /* >= */
     TOKEN_AT_EXIT,
     TOKEN_AT_PANIC,
-    TOKEN_FUNC
+    TOKEN_FUNC,
+
+    /* --- Extended Tokens for Self-Hosting Capabilities --- */
+    TOKEN_AMP,      /* '&' Address-of / Bitwise AND */
+    TOKEN_PIPE,     /* '|' Bitwise OR */
+    TOKEN_CARET,    /* '^' Bitwise XOR */
+    TOKEN_LSHIFT,   /* '<<' Bitwise Shift Left */
+    TOKEN_RSHIFT,   /* '>>' Bitwise Shift Right */
+    TOKEN_ARROW,    /* '->' Member Access Pointer */
+    TOKEN_DOT,      /* '.' Member Access Direct */
+    TOKEN_LBRACKET, /* '[' Array/Pointer Index */
+    TOKEN_RBRACKET, /* ']' */
+    TOKEN_AT_CHAR,  /* '@char' 8-bit Byte Type */
+    TOKEN_AT_PTR    /* '@ptr' Generic Pointer Type */
 } MTokenType;
 
 typedef enum { 
@@ -50,8 +63,20 @@ typedef enum {
     NODE_RETURN,
     NODE_EXIT,
     NODE_PANIC,
-    NODE_BUILTIN_CALL
-} ASTNodeType;      
+    NODE_BUILTIN_CALL,
+
+    /* --- Extended AST Nodes for Self-Hosting Capabilities --- */
+    NODE_CHAR,       /* 8-bit Byte Literal */
+    NODE_DEREF,      /* Dereference (*ptr or ptr[index]) */
+    NODE_ADDR_OF,    /* Address-of (&var) */
+    NODE_MEMBER_REF, /* Struct Field Access (ptr->field or struct.field) */
+    NODE_ASSIGN_PTR, /* Store via Pointer (*ptr = val) */
+    NODE_BIT_AND,    /* Bitwise AND (&) */
+    NODE_BIT_OR,     /* Bitwise OR (|) */
+    NODE_BIT_XOR,    /* Bitwise XOR (^) */
+    NODE_SHL,        /* Shift Left (<<) */
+    NODE_SHR         /* Shift Right (>>) */
+} ASTNodeType;     
 
 /* Alias NodeType */
 typedef ASTNodeType NodeType;
@@ -65,7 +90,11 @@ typedef enum {
     BUILTIN_FREE,
     BUILTIN_SIZEOF,
     BUILTIN_EXIT,
-    BUILTIN_PANIC
+    BUILTIN_PANIC,
+
+    /* --- Extended Memory Primitives --- */
+    BUILTIN_LOAD8,   /* Load 1 Byte (movzx / ldrb) */
+    BUILTIN_STORE8   /* Store 1 Byte (mov byte / strb) */
 } BuiltinKind;
 
 typedef struct ASTNode {
@@ -84,6 +113,13 @@ typedef struct ASTNode {
     struct ASTNode *then_branch;   /* if true */
     struct ASTNode *else_branch;   /* if false */
 
+    /* Pointer & Member Access Links */
+    struct ASTNode *ptr;           /* Pointer expression to dereference */
+    struct ASTNode *offset;        /* Array index or byte offset calculation */
+    char member_name[32];          /* Struct field identifier */
+    int member_offset;             /* Calculated memory byte offset for struct fields */
+    bool is_byte_op;               /* Flag: true if 8-bit (char), false if 64-bit (int/ptr) */
+
     /* Loop Structure */
     struct ASTNode *for_init;
     struct ASTNode *for_cond;
@@ -93,7 +129,7 @@ typedef struct ASTNode {
 
     /* Block Statements */
     struct ASTNode **statements;    
-    int stmt_count;               
+    int stmt_count;                
 
     /* Function Declaration & Calls */
     char **params;
@@ -117,7 +153,8 @@ typedef struct {
 
 typedef enum {
     SYM_FUNCTION,
-    SYM_VARIABLE
+    SYM_VARIABLE,
+    SYM_STRUCT
 } SymbolKind;
 
 typedef struct Symbol {
@@ -125,6 +162,8 @@ typedef struct Symbol {
     SymbolKind kind;
     bool is_declared;  /* True if loaded from .mlov */
     bool is_defined;   /* True if body implemented in .ml */
+    int stack_offset;  /* Local variable stack frame offset relative to RBP/FP */
+    size_t data_size;  /* Data size: 1 byte (char), 8 bytes (int/ptr) */
     struct Symbol *next;
 } Symbol;
 
