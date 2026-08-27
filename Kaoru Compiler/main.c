@@ -9,7 +9,6 @@
 #include "mcodegen.c"  
 #include "mlexer.c"    
 #include "mparser.c"   
-#include "marloru.c"
 
 #define KAORU_VERSION "1.0.0"
 
@@ -32,7 +31,7 @@ static void cleanup_symbol_table(SymbolTable *symtab) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        run_interactive_cli();
+        print_usage(argv[0]);
         return 1;
     }
 
@@ -59,6 +58,7 @@ int main(int argc, char *argv[]) {
 
     if (!source_file) {
         printf("[Kaoru CLI Error]: No input .ml source file provided.\n");
+        print_usage(argv[0]);
         return 1;
     }
 
