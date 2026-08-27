@@ -1,4 +1,4 @@
-// mcodegen.c - Marlov Compiler Code Generation Module
+// mcodegen.c - Kaoru Compiler Code Generation Module
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -246,6 +246,40 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 #elif defined(__aarch64__) || defined(_M_ARM64)
             fprintf(out, "    bl exit\n");
 #endif
+            break;
+        /* Arithmetic & Bitwise Logic */
+        case NODE_ADD:
+        case NODE_SUB:
+        case NODE_MUL:
+        case NODE_DIV:
+        case NODE_BIT_AND:
+        case NODE_BIT_OR:
+        case NODE_BIT_XOR:
+        case NODE_SHL:
+        case NODE_SHR:
+        case NODE_EQ:
+        case NODE_NEQ:
+        case NODE_LT:
+        case NODE_GT:
+        case NODE_LTE:
+        case NODE_GTE:
+            generate_binary_op_asm(out, node, sec_ctx);
+            break;
+
+        /* Pointer Operations */
+        case NODE_DEREF:
+        case NODE_ADDR_OF:
+            generate_unary_op_asm(out, node, sec_ctx);
+            break;
+
+        case NODE_INDEX:
+            generate_index_asm(out, node, sec_ctx);
+            break;
+
+        /* Byte Access Directives */
+        case NODE_LOAD_BYTE:
+        case NODE_STORE_BYTE:
+            generate_byte_access_asm(out, node, sec_ctx);
             break;
 
         case NODE_PANIC:
@@ -661,4 +695,199 @@ void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 
     fprintf(out, ".L_for_end_%d:\n", cur_id);
     fprintf(out, "    ; --- For Loop End ---\n");
+}
+/* =========================================================================
+ * Generate Assembly for Unary Operations (*p, &x)
+ * ========================================================================= */
+void generate_unary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    if (!node) return;
+
+    switch (node->type) {
+        case NODE_DEREF:
+            /* Evaluate address expression into result register */
+            generate_code_from_ast(out, node->left, sec_ctx);
+            fprintf(out, "    ; --- Dereference Pointer (*p) ---\n");
+#if defined(__x86_64__) || defined(_M_X64)
+            fprintf(out, "    mov rax, [rax]\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+            fprintf(out, "    ldr x0, [x0]\n");
+#endif
+            break;
+
+        case NODE_ADDR_OF:
+            /* Note: Assumes variable reference or lvalue in left node */
+            fprintf(out, "    ; --- Address Of (&var) ---\n");
+            if (node->left && node->left->type == NODE_VAR_REF) {
+#if defined(__x86_64__) || defined(_M_X64)
+                /* Local variable stack frame address computation */
+                fprintf(out, "    lea rax, [rbp - %d]\n", node->left->val); 
+#elif defined(__aarch64__) || defined(_M_ARM64)
+                fprintf(out, "    sub x0, x29, #%d\n", node->left->val);
+#endif
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
+/* =========================================================================
+ * Generate Assembly for Pointer Offset & Array Indexing (arr[i])
+ * ========================================================================= */
+void generate_index_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    if (!node || node->type != NODE_INDEX) return;
+
+    fprintf(out, "    ; --- Array Indexing / Pointer Offset Access ---\n");
+    /* Evaluate Index expression */
+    generate_code_from_ast(out, node->right, sec_ctx);
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    push rax\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    str x0, [sp, #-16]!\n");
+#endif
+
+    /* Evaluate Base Pointer address */
+    generate_code_from_ast(out, node->left, sec_ctx);
+
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    pop rbx\n");
+    /* Multiply index by element size (default 8 bytes for 64-bit pointers) */
+    fprintf(out, "    shl rbx, 3\n");
+    fprintf(out, "    add rax, rbx\n");
+    fprintf(out, "    mov rax, [rax]\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    ldr x1, [sp], #16\n");
+    fprintf(out, "    lsl x1, x1, #3\n");
+    fprintf(out, "    add x0, x0, x1\n");
+    fprintf(out, "    ldr x0, [x0]\n");
+#endif
+}
+
+/* =========================================================================
+ * Generate Assembly for Byte Loading/Storing (8-bit Access)
+ * ========================================================================= */
+void generate_byte_access_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    if (!node) return;
+
+    if (node->type == NODE_LOAD_BYTE) {
+        /* Read uint8_t / char from memory address */
+        generate_code_from_ast(out, node->left, sec_ctx);
+        fprintf(out, "    ; --- Load Byte (8-bit Read) ---\n");
+#if defined(__x86_64__) || defined(_M_X64)
+        fprintf(out, "    movzx rax, byte ptr [rax]\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        fprintf(out, "    ldrb w0, [x0]\n");
+#endif
+    } else if (node->type == NODE_STORE_BYTE) {
+        /* Write uint8_t value to target address: store_b(addr, val) */
+        generate_code_from_ast(out, node->right, sec_ctx); // Value to store
+#if defined(__x86_64__) || defined(_M_X64)
+        fprintf(out, "    push rax\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        fprintf(out, "    str x0, [sp, #-16]!\n");
+#endif
+
+        generate_code_from_ast(out, node->left, sec_ctx); // Target Address
+
+#if defined(__x86_64__) || defined(_M_X64)
+        fprintf(out, "    pop rbx\n");
+        fprintf(out, "    mov byte ptr [rax], bl\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        fprintf(out, "    ldr x1, [sp], #16\n");
+        fprintf(out, "    strb w1, [x0]\n");
+#endif
+    }
+}
+void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
+    generate_code_from_ast(out, node->right, sec_ctx);
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    push rax\n");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    str x0, [sp, #-16]!\n");
+#endif
+
+    generate_code_from_ast(out, node->left, sec_ctx);
+
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, "    pop rbx\n");
+    switch (node->type) {
+        case NODE_ADD: fprintf(out, "    add rax, rbx\n"); break;
+        case NODE_SUB: fprintf(out, "    sub rax, rbx\n"); break;
+        case NODE_MUL: fprintf(out, "    imul rax, rbx\n"); break;
+        case NODE_DIV: 
+            fprintf(out, "    cqo\n");
+            fprintf(out, "    idiv rbx\n"); 
+            break;
+
+        /* Bitwise Logic Operations */
+        case NODE_BIT_AND: fprintf(out, "    and rax, rbx\n"); break;
+        case NODE_BIT_OR:  fprintf(out, "    or rax, rbx\n"); break;
+        case NODE_BIT_XOR: fprintf(out, "    xor rax, rbx\n"); break;
+        case NODE_SHL: 
+            fprintf(out, "    mov rcx, rbx\n");
+            fprintf(out, "    shl rax, cl\n"); 
+            break;
+        case NODE_SHR: 
+            fprintf(out, "    mov rcx, rbx\n");
+            fprintf(out, "    sar rax, cl\n"); 
+            break;
+
+        case NODE_EQ:
+            fprintf(out, "    cmp rax, rbx\n    sete al\n    movzx rax, al\n");
+            break;
+        case NODE_NEQ:
+            fprintf(out, "    cmp rax, rbx\n    setne al\n    movzx rax, al\n");
+            break;
+        case NODE_LT:
+            fprintf(out, "    cmp rax, rbx\n    setl al\n    movzx rax, al\n");
+            break;
+        case NODE_GT:
+            fprintf(out, "    cmp rax, rbx\n    setg al\n    movzx rax, al\n");
+            break;
+        case NODE_LTE:
+            fprintf(out, "    cmp rax, rbx\n    setle al\n    movzx rax, al\n");
+            break;
+        case NODE_GTE:
+            fprintf(out, "    cmp rax, rbx\n    setge al\n    movzx rax, al\n");
+            break;
+        default: break;
+    }
+
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    ldr x1, [sp], #16\n");
+    switch (node->type) {
+        case NODE_ADD: fprintf(out, "    add x0, x0, x1\n"); break;
+        case NODE_SUB: fprintf(out, "    sub x0, x0, x1\n"); break;
+        case NODE_MUL: fprintf(out, "    mul x0, x0, x1\n"); break;
+        case NODE_DIV: fprintf(out, "    sdiv x0, x0, x1\n"); break;
+
+        /* Bitwise Logic Operations */
+        case NODE_BIT_AND: fprintf(out, "    and x0, x0, x1\n"); break;
+        case NODE_BIT_OR:  fprintf(out, "    orr x0, x0, x1\n"); break;
+        case NODE_BIT_XOR: fprintf(out, "    eor x0, x0, x1\n"); break;
+        case NODE_SHL:     fprintf(out, "    lsl x0, x0, x1\n"); break;
+        case NODE_SHR:     fprintf(out, "    asr x0, x0, x1\n"); break;
+
+        case NODE_EQ:
+            fprintf(out, "    cmp x0, x1\n    cset x0, eq\n");
+            break;
+        case NODE_NEQ:
+            fprintf(out, "    cmp x0, x1\n    cset x0, ne\n");
+            break;
+        case NODE_LT:
+            fprintf(out, "    cmp x0, x1\n    cset x0, lt\n");
+            break;
+        case NODE_GT:
+            fprintf(out, "    cmp x0, x1\n    cset x0, gt\n");
+            break;
+        case NODE_LTE:
+            fprintf(out, "    cmp x0, x1\n    cset x0, le\n");
+            break;
+        case NODE_GTE:
+            fprintf(out, "    cmp x0, x1\n    cset x0, ge\n");
+            break;
+        default: break;
+    }
+#endif
 }

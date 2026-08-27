@@ -53,7 +53,12 @@ static BuiltinKind resolve_builtin_kind(const char *name) {
     if (strcmp(name, "panic") == 0)  return BUILTIN_PANIC;
     return (BuiltinKind)-1;
 }
-
+/* Builtin Resolver */
+static BuiltinKind resolve_builtin_kind_ext(const char *name) {
+    if (strcmp(name, "load_b") == 0)  return BUILTIN_LOAD_BYTE;  // Read uint8 (*p)
+    if (strcmp(name, "store_b") == 0) return BUILTIN_STORE_BYTE; // Write uint8 (*p = val)
+    return resolve_builtin_kind(name);
+}
 /* =========================================================================
  * AST Node Creation Helpers
  * ========================================================================= */
@@ -157,7 +162,26 @@ ASTNode* create_block_node(ASTNode** stmts, int count) {
     node->stmt_count = count;
     return node;
 }
+ASTNode* create_unary_node(ASTNodeType type, ASTNode *operand) {
+    ASTNode *node = create_ast_node(type);
+    node->left = operand;
+    return node;
+}
 
+ASTNode* create_index_node(ASTNode *target, ASTNode *index) {
+    ASTNode *node = create_ast_node(NODE_INDEX);
+    node->left = target;
+    node->right = index;
+    return node;
+}
+
+ASTNode* create_member_node(ASTNode *target, const char *field_name, bool is_arrow) {
+    ASTNode *node = create_ast_node(NODE_MEMBER);
+    node->left = target;
+    strncpy(node->var_name, field_name, sizeof(node->var_name) - 1);
+    node->val = is_arrow ? 1 : 0; // Use val flag to mark '->' vs '.'
+    return node;
+}
 ASTNode* create_func_decl_node(const char *name, char **params, int param_count, ASTNode *body) {
     ASTNode *node = create_ast_node(NODE_FUNC_DECL);
     strncpy(node->var_name, name, sizeof(node->var_name) - 1);
@@ -468,14 +492,16 @@ static ASTNode* parse_primary(FILE *in, Token *current_tok) {
 }
 
 static ASTNode* parse_multiplicative(FILE *in, Token *current_tok) {
-    ASTNode *left = parse_primary(in, current_tok);
+    /* Route through parse_unary to capture *, &, [], and -> precedence first */
+    ASTNode *left = parse_unary(in, current_tok);
     if (!left) return NULL;
 
     while (current_tok->type == TOKEN_STAR || current_tok->type == TOKEN_SLASH) {
         MTokenType op = current_tok->type;
         *current_tok = next_token(in); 
 
-        ASTNode *right = parse_primary(in, current_tok);
+        /* Right-hand side must also evaluate unary/postfix expressions */
+        ASTNode *right = parse_unary(in, current_tok);
         if (!right) {
             free_ast(left);
             return NULL;
@@ -489,7 +515,6 @@ static ASTNode* parse_multiplicative(FILE *in, Token *current_tok) {
     }
     return left;
 }
-
 static ASTNode* parse_expression(FILE *in, Token *current_tok) {
     ASTNode *left = parse_multiplicative(in, current_tok);
     if (!left) return NULL;
@@ -744,7 +769,133 @@ static ASTNode* parse_func_decl(FILE *in, Token *current_tok) {
     ASTNode *body = parse_statement_or_block(in, current_tok);
     return create_func_decl_node(func_name, params, param_count, body);
 }
+static ASTNode* parse_postfix(FILE *in, Token *current_tok) {
+    ASTNode *node = parse_primary(in, current_tok);
+    if (!node) return NULL;
 
+    while (1) {
+        /* Array/Offset Access: arr[i] */
+        if (current_tok->type == TOKEN_LBRACKET) {
+            *current_tok = next_token(in); // Consume '['
+            ASTNode *index = parse_expression(in, current_tok);
+            if (current_tok->type != TOKEN_RBRACKET) {
+                printf("[Kaoru Syntax Error Line %u]: Expected ']'\n", current_tok->line);
+                free_ast(node);
+                free_ast(index);
+                return NULL;
+            }
+            *current_tok = next_token(in); // Consume ']'
+            node = create_index_node(node, index);
+        }
+        /* Member Access via Pointer: p->field or p.field */
+        else if (current_tok->type == TOKEN_ARROW || current_tok->type == TOKEN_DOT) {
+            bool is_arrow = (current_tok->type == TOKEN_ARROW);
+            *current_tok = next_token(in); // Consume '->' or '.'
+            
+            if (current_tok->type != TOKEN_IDENTIFIER) {
+                printf("[Kaoru Syntax Error Line %u]: Expected member name\n", current_tok->line);
+                free_ast(node);
+                return NULL;
+            }
+            
+            char field_name[32];
+            strncpy(field_name, current_tok->value, sizeof(field_name) - 1);
+            field_name[sizeof(field_name) - 1] = '\0';
+            *current_tok = next_token(in); // Consume field name
+            
+            node = create_member_node(node, field_name, is_arrow);
+        } 
+        else {
+            break;
+        }
+    }
+    return node;
+}
+static ASTNode* parse_unary(FILE *in, Token *current_tok) {
+    /* Dereference: *p */
+    if (current_tok->type == TOKEN_STAR) {
+        *current_tok = next_token(in); // Consume '*'
+        ASTNode *operand = parse_unary(in, current_tok);
+        return create_unary_node(NODE_DEREF, operand);
+    }
+    /* Address-of: &x */
+    if (current_tok->type == TOKEN_AMP) {
+        *current_tok = next_token(in); // Consume '&'
+        ASTNode *operand = parse_unary(in, current_tok);
+        return create_unary_node(NODE_ADDR_OF, operand);
+    }
+
+    return parse_postfix(in, current_tok);
+}
+/* Shift Operators: <<, >> */
+static ASTNode* parse_shift(FILE *in, Token *current_tok) {
+    ASTNode *left = parse_multiplicative(in, current_tok);
+    if (!left) return NULL;
+
+    while (current_tok->type == TOKEN_SHL || current_tok->type == TOKEN_SHR) {
+        MTokenType op = current_tok->type;
+        *current_tok = next_token(in);
+
+        ASTNode *right = parse_multiplicative(in, current_tok);
+        if (!right) {
+            free_ast(left);
+            return NULL;
+        }
+        ASTNodeType node_type = (op == TOKEN_SHL) ? NODE_SHL : NODE_SHR;
+        left = create_binary_node(node_type, left, right);
+    }
+    return left;
+}
+
+/* Bitwise AND: & */
+static ASTNode* parse_bit_and(FILE *in, Token *current_tok) {
+    ASTNode *left = parse_shift(in, current_tok);
+    if (!left) return NULL;
+
+    while (current_tok->type == TOKEN_AMP) {
+        *current_tok = next_token(in);
+        ASTNode *right = parse_shift(in, current_tok);
+        if (!right) {
+            free_ast(left);
+            return NULL;
+        }
+        left = create_binary_node(NODE_BIT_AND, left, right);
+    }
+    return left;
+}
+
+/* Bitwise XOR: ^ */
+static ASTNode* parse_bit_xor(FILE *in, Token *current_tok) {
+    ASTNode *left = parse_bit_and(in, current_tok);
+    if (!left) return NULL;
+
+    while (current_tok->type == TOKEN_CARET) {
+        *current_tok = next_token(in);
+        ASTNode *right = parse_bit_and(in, current_tok);
+        if (!right) {
+            free_ast(left);
+            return NULL;
+        }
+        left = create_binary_node(NODE_BIT_XOR, left, right);
+    }
+    return left;
+}
+
+/* Bitwise OR: | */
+static ASTNode* parse_bit_or(FILE *in, Token *current_tok) {
+    ASTNode *left = parse_bit_xor(in, current_tok);
+    if (!left) return NULL;
+    while (current_tok->type == TOKEN_PIPE) {
+        *current_tok = next_token(in);
+        ASTNode *right = parse_bit_xor(in, current_tok);
+        if (!right) {
+            free_ast(left);
+            return NULL;
+        }
+        left = create_binary_node(NODE_BIT_OR, left, right);
+    }
+    return left;
+}
 /* Consolidated Main Statement Router */
 static ASTNode* parse_statement(FILE *in, Token *current_tok) {
     // 1. Standalone Scope Block `{ ... }`
