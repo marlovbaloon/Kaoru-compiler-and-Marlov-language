@@ -18,7 +18,15 @@ typedef enum {
     IR_LABEL,
     IR_RETURN,
     IR_BREAK,
-    IR_CONTINUE
+    IR_CONTINUE,
+    /* Operations สำหรับ Self-Hosting */
+    IR_ADDR_OF,        /* t1 = &var                     */
+    IR_LOAD_PTR,       /* t1 = *p                       */
+    IR_STORE_PTR,      /* *p = t1                       */
+    IR_PARAM,          /* param t1                      */
+    IR_CALL,           /* t1 = call func_name, num_args */
+    IR_LOAD_BYTE,      /* t1 = (uint8_t)*p              */
+    IR_STORE_BYTE      /* *(uint8_t*)p = t1             */
 } IROpcode;
 
 typedef struct IRInstruction {
