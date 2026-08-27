@@ -19,7 +19,7 @@ typedef enum {
     IR_RETURN,
     IR_BREAK,
     IR_CONTINUE,
-    /* Operations สำหรับ Self-Hosting */
+    /* Operations for Self-Hosting */
     IR_ADDR_OF,        /* t1 = &var                     */
     IR_LOAD_PTR,       /* t1 = *p                       */
     IR_STORE_PTR,      /* *p = t1                       */
