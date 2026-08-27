@@ -15,7 +15,10 @@ typedef enum {
     IR_ADD, IR_SUB, IR_MUL, IR_DIV,
     IR_PRINT,
     IR_JUMP, IR_JUMP_IF_FALSE,
-    IR_LABEL
+    IR_LABEL,
+    IR_RETURN,
+    IR_BREAK,
+    IR_CONTINUE
 } IROpcode;
 
 typedef struct IRInstruction {

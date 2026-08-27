@@ -3,7 +3,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include "mir.h"
+#define MAX_SCOPE_DEPTH 64
 
+typedef struct {
+    size_t scope_stack[MAX_SCOPE_DEPTH];
+    int scope_depth;
+    /* Label targets for break/continue */
+    char current_break_label[32];
+    char current_continue_label[32];
+} LoweringContext;
+
+/* Helper: calculate Stack consume return (Emit Unwind) when Early Exit */
+static size_t get_total_active_stack_bytes(LoweringContext *ctx) {
+    size_t total = 0;
+    for (int i = 0; i < ctx->scope_depth; i++) {
+        total += ctx->scope_stack[i];
+    }
+    return total;
+}
 static IRInstruction* create_ir_inst(IROpcode op) {
     IRInstruction *inst = (IRInstruction *)calloc(1, sizeof(IRInstruction));
     if (!inst) exit(1);
@@ -60,6 +77,69 @@ static void lower_ast_rec(ASTNode *node, IRProgram *prog, int *current_offset, c
     }
 
     switch (node->type) {
+        case NODE_BLOCK: {
+            size_t raw_size = calculate_scope_size(node);
+            size_t aligned_scope_size = align8(raw_size);
+
+            /* Push Scope */
+            if (ctx->scope_depth < MAX_SCOPE_DEPTH) {
+                ctx->scope_stack[ctx->scope_depth++] = aligned_scope_size;
+            }
+
+            IRInstruction *enter = create_ir_inst(IR_ENTER_SCOPE);
+            enter->imm_val = (int)aligned_scope_size;
+            append_inst(prog, enter);
+
+            int local_offset_tracker = 0;
+            for (int i = 0; i < node->stmt_count; i++) {
+                lower_ast_rec(node->statements[i], prog, ctx, &local_offset_tracker, NULL, 0);
+            }
+
+            IRInstruction *exit_inst = create_ir_inst(IR_EXIT_SCOPE);
+            exit_inst->imm_val = (int)aligned_scope_size;
+            append_inst(prog, exit_inst);
+
+            /* Pop Scope */
+            if (ctx->scope_depth > 0) {
+                ctx->scope_depth--;
+            }
+            break;
+        }
+
+        case NODE_RETURN: {
+            /* 1. Evaluate return value expression if exists */
+            if (node->left) {
+                char ret_sym[32] = {0};
+                lower_ast_rec(node->left, prog, ctx, current_offset, ret_sym, sizeof(ret_sym));
+            }
+
+            /* 2. Emit Stack Cleanup for ALL active nested scopes BEFORE returning */
+            size_t unwind_bytes = get_total_active_stack_bytes(ctx);
+            if (unwind_bytes > 0) {
+                IRInstruction *unwind = create_ir_inst(IR_EXIT_SCOPE);
+                unwind->imm_val = (int)unwind_bytes;
+                append_inst(prog, unwind);
+            }
+
+            /* 3. Emit Actual Return */
+            IRInstruction *ret = create_ir_inst(IR_RETURN);
+            append_inst(prog, ret);
+            break;
+        }
+
+        case NODE_BREAK: {
+            /* Emit Cleanup for Scope inside Loop */
+            size_t unwind_bytes = get_total_active_stack_bytes(ctx); // custom Loop Depth 
+            if (unwind_bytes > 0) {
+                IRInstruction *unwind = create_ir_inst(IR_EXIT_SCOPE);
+                unwind->imm_val = (int)unwind_bytes;
+                append_inst(prog, unwind);
+            }
+            IRInstruction *jmp = create_ir_inst(IR_JUMP);
+            strncpy(jmp->target, ctx->current_break_label, sizeof(jmp->target) - 1);
+            append_inst(prog, jmp);
+            break;
+        }
         case NODE_INT: {
             new_temp(prog, out_target, out_size);
             IRInstruction *inst = create_ir_inst(IR_ASSIGN);
