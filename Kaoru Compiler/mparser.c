@@ -1,10 +1,11 @@
+// mparser.c - Syntax Parser & AST Construction Module
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 #include "mtypes.h"
 
-extern Token next_token(FILE *f); 
+extern Token next_token(FILE *f);
 
 /* Forward declarations */
 static ASTNode* parse_statement(FILE *in, Token *current_tok);
@@ -13,10 +14,14 @@ static ASTNode* parse_expression(FILE *in, Token *current_tok);
 static ASTNode* parse_builtin_call(FILE *in, Token *current_tok);
 static ASTNode* parse_for_statement(FILE *in, Token *current_tok);
 static ASTNode* parse_func_decl(FILE *in, Token *current_tok);
+static ASTNode* parse_unary(FILE *in, Token *current_tok);
 
 static ASTArena global_arena = {NULL, 0, 0};
-static void register_symbol(SymbolTable *symtab, const char *name, SymbolKind kind, bool is_declared, bool is_defined) {
-    /* Check duplicate */
+
+void register_symbol(SymbolTable *symtab, const char *name, SymbolKind kind, bool is_declared, bool is_defined) {
+    if (!symtab || !name) return;
+
+    /* Check duplicate symbol entry */
     Symbol *curr = symtab->head;
     while (curr) {
         if (strcmp(curr->name, name) == 0) {
@@ -26,8 +31,13 @@ static void register_symbol(SymbolTable *symtab, const char *name, SymbolKind ki
         curr = curr->next;
     }
 
-    /* Create new symbol */
+    /* Allocate and register new symbol */
     Symbol *sym = (Symbol *)malloc(sizeof(Symbol));
+    if (!sym) {
+        fprintf(stderr, "[Kaoru Fatal Error]: Symbol allocation failed\n");
+        exit(EXIT_FAILURE);
+    }
+    memset(sym, 0, sizeof(Symbol));
     strncpy(sym->name, name, sizeof(sym->name) - 1);
     sym->kind = kind;
     sym->is_declared = is_declared;
@@ -35,6 +45,7 @@ static void register_symbol(SymbolTable *symtab, const char *name, SymbolKind ki
     sym->next = symtab->head;
     symtab->head = sym;
 }
+
 void init_ast_arena(size_t initial_capacity) {
     global_arena.nodes = (ASTNode *)malloc(sizeof(ASTNode) * initial_capacity);
     global_arena.capacity = initial_capacity;
@@ -51,24 +62,20 @@ static BuiltinKind resolve_builtin_kind(const char *name) {
     if (strcmp(name, "sizeof") == 0) return BUILTIN_SIZEOF;
     if (strcmp(name, "exit") == 0)   return BUILTIN_EXIT;
     if (strcmp(name, "panic") == 0)  return BUILTIN_PANIC;
+    if (strcmp(name, "load_b") == 0) return BUILTIN_LOAD8;
+    if (strcmp(name, "store_b") == 0) return BUILTIN_STORE8;
     return (BuiltinKind)-1;
 }
-/* Builtin Resolver */
-static BuiltinKind resolve_builtin_kind_ext(const char *name) {
-    if (strcmp(name, "load_b") == 0)  return BUILTIN_LOAD_BYTE;  // Read uint8 (*p)
-    if (strcmp(name, "store_b") == 0) return BUILTIN_STORE_BYTE; // Write uint8 (*p = val)
-    return resolve_builtin_kind(name);
-}
+
 /* =========================================================================
  * AST Node Creation Helpers
  * ========================================================================= */
 static ASTNode* create_ast_node(ASTNodeType type) {
-    ASTNode *node = (ASTNode *)malloc(sizeof(ASTNode));
+    ASTNode *node = (ASTNode *)calloc(1, sizeof(ASTNode));
     if (!node) {
         printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
-    memset(node, 0, sizeof(ASTNode));
     node->type = type;
     return node;
 }
@@ -112,6 +119,7 @@ ASTNode* create_var_decl_node(MTokenType data_type, const char* name, ASTNode* e
     node->data_type = data_type; 
     strncpy(node->var_name, name, sizeof(node->var_name) - 1);
     node->left = expr; 
+    node->val = (data_type == TOKEN_AT_CHAR) ? 1 : 8;
     return node;
 }
 
@@ -146,6 +154,7 @@ ASTNode* create_while_node(ASTNode* cond, ASTNode* body) {
     ASTNode *node = create_ast_node(NODE_WHILE);
     node->cond = cond;          
     node->then_branch = body;   
+    node->body = body;
     return node;
 }
 
@@ -162,6 +171,7 @@ ASTNode* create_block_node(ASTNode** stmts, int count) {
     node->stmt_count = count;
     return node;
 }
+
 ASTNode* create_unary_node(ASTNodeType type, ASTNode *operand) {
     ASTNode *node = create_ast_node(type);
     node->left = operand;
@@ -169,19 +179,20 @@ ASTNode* create_unary_node(ASTNodeType type, ASTNode *operand) {
 }
 
 ASTNode* create_index_node(ASTNode *target, ASTNode *index) {
-    ASTNode *node = create_ast_node(NODE_INDEX);
+    ASTNode *node = create_ast_node(NODE_DEREF);
     node->left = target;
-    node->right = index;
+    node->offset = index;
     return node;
 }
 
 ASTNode* create_member_node(ASTNode *target, const char *field_name, bool is_arrow) {
-    ASTNode *node = create_ast_node(NODE_MEMBER);
+    ASTNode *node = create_ast_node(NODE_MEMBER_REF);
     node->left = target;
-    strncpy(node->var_name, field_name, sizeof(node->var_name) - 1);
-    node->val = is_arrow ? 1 : 0; // Use val flag to mark '->' vs '.'
+    strncpy(node->member_name, field_name, sizeof(node->member_name) - 1);
+    node->val = is_arrow ? 1 : 0;
     return node;
 }
+
 ASTNode* create_func_decl_node(const char *name, char **params, int param_count, ASTNode *body) {
     ASTNode *node = create_ast_node(NODE_FUNC_DECL);
     strncpy(node->var_name, name, sizeof(node->var_name) - 1);
@@ -229,29 +240,35 @@ void free_ast(ASTNode *node) {
     if (!node) return;
     
     if (node->type == NODE_BLOCK) {
-        for (int i = 0; i < node->stmt_count; i++) {
-            free_ast(node->statements[i]);
+        if (node->statements) {
+            for (int i = 0; i < node->stmt_count; i++) {
+                free_ast(node->statements[i]);
+            }
+            free(node->statements); 
         }
-        free(node->statements); 
         free(node);
         return;
     }
 
     if (node->type == NODE_FUNC_DECL) {
-        for (int i = 0; i < node->param_count; i++) {
-            free(node->params[i]);
+        if (node->params) {
+            for (int i = 0; i < node->param_count; i++) {
+                free(node->params[i]);
+            }
+            free(node->params);
         }
-        free(node->params);
         free_ast(node->func_body);
         free(node);
         return;
     }
 
     if (node->type == NODE_FUNC_CALL || node->type == NODE_BUILTIN_CALL) {
-        for (int i = 0; i < node->arg_count; i++) {
-            free_ast(node->args[i]);
+        if (node->args) {
+            for (int i = 0; i < node->arg_count; i++) {
+                free_ast(node->args[i]);
+            }
+            free(node->args);
         }
-        free(node->args);
         free(node);
         return;
     }
@@ -276,19 +293,23 @@ void free_ast(ASTNode *node) {
     if (node->type == NODE_WHILE) {
         free_ast(node->cond);
         free_ast(node->then_branch);
+        free_ast(node->body);
         free(node);
         return;
     }
 
     free_ast(node->left);
     free_ast(node->right);
+    free_ast(node->ptr);
+    free_ast(node->offset);
     free(node);
 }
 
 /* =========================================================================
- * Security Context
+ * Security Context Initialization
  * ========================================================================= */
 void parse_program(FILE *in, SecurityContext *sec_ctx) {
+    if (!in || !sec_ctx) return;
     long original_pos = ftell(in);
     rewind(in);
 
@@ -303,7 +324,7 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
     }
 
     sec_ctx->hardware_hash = get_hardware_signature();
-    printf("[Kaoru Compiler]: Security context initialized. Owner Hash: 0x%LLX\n", (unsigned long long)sec_ctx->hardware_hash);   
+    printf("[Kaoru Compiler]: Security context initialized. Owner Hash: 0x%llX\n", (unsigned long long)sec_ctx->hardware_hash);   
 
     fseek(in, original_pos, SEEK_SET);
 }
@@ -311,8 +332,8 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
 /* =========================================================================
  * Expression & Statement Recursive Descent Parser
  * ========================================================================= */
-/* Parse .mlov files to collect interface/function declarations */
 bool parse_mlov_header(const char *mlov_path, SymbolTable *symtab, SecurityContext *sec_ctx) {
+    (void)sec_ctx;
     FILE *f = fopen(mlov_path, "r");
     if (!f) {
         printf("[Parser Error]: Cannot open header file '%s'\n", mlov_path);
@@ -321,8 +342,6 @@ bool parse_mlov_header(const char *mlov_path, SymbolTable *symtab, SecurityConte
 
     char line[256];
     while (fgets(line, sizeof(line), f)) {
-        /* Simple Lexing/Parsing logic for .mlov header prototypes */
-        /* Example syntax in .mlov: "decl fn my_func();" */
         char sym_name[64];
         if (sscanf(line, "decl fn %63s", sym_name) == 1) {
             register_symbol(symtab, sym_name, SYM_FUNCTION, true, false);
@@ -332,15 +351,12 @@ bool parse_mlov_header(const char *mlov_path, SymbolTable *symtab, SecurityConte
     fclose(f);
     return true;
 }
-/* Main AST Parser extending support for symbol table matching */
+
 ASTNode *parse_with_symbols(FILE *in, SymbolTable *symtab) {
-    /* 
-     * Implement your AST Parsing loop here.
-     * When encountering function implementations in .ml, 
-     * call: register_symbol(symtab, func_name, SYM_FUNCTION, true, true);
-     */
-    return NULL; /* Return root ASTNode */
+    (void)symtab;
+    return parse_statement_or_block(in, NULL);
 }
+
 static ASTNode* parse_builtin_call(FILE *in, Token *current_tok) {
     const char *name = current_tok->value;
     if (name[0] == '@') name++;
@@ -351,13 +367,13 @@ static ASTNode* parse_builtin_call(FILE *in, Token *current_tok) {
         return NULL;
     }
 
-    *current_tok = next_token(in); // Consumes `@name`
+    *current_tok = next_token(in);
 
     if (current_tok->type != TOKEN_LPAREN) {
         printf("[Kaoru Syntax Error Line %u]: Expected '(' after '@%s'\n", current_tok->line, name);
         return NULL;
     }
-    *current_tok = next_token(in); // Consumes '('
+    *current_tok = next_token(in);
 
     ASTNode **args = NULL;
     int arg_count = 0;
@@ -374,14 +390,14 @@ static ASTNode* parse_builtin_call(FILE *in, Token *current_tok) {
 
             if (arg_count >= capacity) {
                 capacity = (capacity == 0) ? 4 : capacity * 2;
-                ASTNode **new_args = realloc(args, sizeof(ASTNode*) * capacity);
-                if (!new_args) { free(args); exit(1); }
+                ASTNode **new_args = (ASTNode **)realloc(args, sizeof(ASTNode*) * capacity);
+                if (!new_args) { free(args); exit(EXIT_FAILURE); }
                 args = new_args;
             }
             args[arg_count++] = arg;
 
             if (current_tok->type == TOKEN_COMMA) {
-                *current_tok = next_token(in); // Consumes ','
+                *current_tok = next_token(in);
             } else {
                 break;
             }
@@ -394,13 +410,12 @@ static ASTNode* parse_builtin_call(FILE *in, Token *current_tok) {
         free(args);
         return NULL;
     }
-    *current_tok = next_token(in); // Consumes ')'
+    *current_tok = next_token(in);
 
     return create_builtin_node(kind, args, arg_count);
 }
 
 static ASTNode* parse_primary(FILE *in, Token *current_tok) {
-    // Check for '@' System Builtins used inside expressions
     if (current_tok->value[0] == '@') {
         const char *name = current_tok->value + 1;
         if ((int)resolve_builtin_kind(name) != -1) {
@@ -436,9 +451,8 @@ static ASTNode* parse_primary(FILE *in, Token *current_tok) {
         name[sizeof(name) - 1] = '\0';
         *current_tok = next_token(in);
 
-        // Function call detection inside expressions
         if (current_tok->type == TOKEN_LPAREN) {
-            *current_tok = next_token(in); // consume '('
+            *current_tok = next_token(in);
             ASTNode **args = NULL;
             int arg_count = 0, capacity = 0;
 
@@ -449,7 +463,7 @@ static ASTNode* parse_primary(FILE *in, Token *current_tok) {
 
                     if (arg_count >= capacity) {
                         capacity = (capacity == 0) ? 4 : capacity * 2;
-                        args = realloc(args, sizeof(ASTNode*) * capacity);
+                        args = (ASTNode **)realloc(args, sizeof(ASTNode*) * capacity);
                     }
                     args[arg_count++] = arg;
 
@@ -461,7 +475,7 @@ static ASTNode* parse_primary(FILE *in, Token *current_tok) {
                 }
             }
             if (current_tok->type == TOKEN_RPAREN) {
-                *current_tok = next_token(in); // consume ')'
+                *current_tok = next_token(in);
             } else {
                 printf("[Kaoru Syntax Error Line %u]: Expected ')' after function call arguments\n", current_tok->line);
                 return NULL;
@@ -469,7 +483,9 @@ static ASTNode* parse_primary(FILE *in, Token *current_tok) {
             return create_func_call_node(name, args, arg_count);
         }
 
-        return create_string_node(name);
+        ASTNode *var_ref = create_ast_node(NODE_VAR_REF);
+        strncpy(var_ref->var_name, name, sizeof(var_ref->var_name) - 1);
+        return var_ref;
     }
 
     if (current_tok->type == TOKEN_LPAREN) {
@@ -491,8 +507,63 @@ static ASTNode* parse_primary(FILE *in, Token *current_tok) {
     return NULL;
 }
 
+static ASTNode* parse_postfix(FILE *in, Token *current_tok) {
+    ASTNode *node = parse_primary(in, current_tok);
+    if (!node) return NULL;
+
+    while (1) {
+        if (current_tok->type == TOKEN_LBRACKET) {
+            *current_tok = next_token(in);
+            ASTNode *index = parse_expression(in, current_tok);
+            if (current_tok->type != TOKEN_RBRACKET) {
+                printf("[Kaoru Syntax Error Line %u]: Expected ']'\n", current_tok->line);
+                free_ast(node);
+                free_ast(index);
+                return NULL;
+            }
+            *current_tok = next_token(in);
+            node = create_index_node(node, index);
+        }
+        else if (current_tok->type == TOKEN_ARROW || current_tok->type == TOKEN_DOT) {
+            bool is_arrow = (current_tok->type == TOKEN_ARROW);
+            *current_tok = next_token(in);
+            
+            if (current_tok->type != TOKEN_IDENTIFIER) {
+                printf("[Kaoru Syntax Error Line %u]: Expected member name\n", current_tok->line);
+                free_ast(node);
+                return NULL;
+            }
+            
+            char field_name[32];
+            strncpy(field_name, current_tok->value, sizeof(field_name) - 1);
+            field_name[sizeof(field_name) - 1] = '\0';
+            *current_tok = next_token(in);
+            
+            node = create_member_node(node, field_name, is_arrow);
+        } 
+        else {
+            break;
+        }
+    }
+    return node;
+}
+
+static ASTNode* parse_unary(FILE *in, Token *current_tok) {
+    if (current_tok->type == TOKEN_STAR) {
+        *current_tok = next_token(in);
+        ASTNode *operand = parse_unary(in, current_tok);
+        return create_unary_node(NODE_DEREF, operand);
+    }
+    if (current_tok->type == TOKEN_AMP) {
+        *current_tok = next_token(in);
+        ASTNode *operand = parse_unary(in, current_tok);
+        return create_unary_node(NODE_ADDR_OF, operand);
+    }
+
+    return parse_postfix(in, current_tok);
+}
+
 static ASTNode* parse_multiplicative(FILE *in, Token *current_tok) {
-    /* Route through parse_unary to capture *, &, [], and -> precedence first */
     ASTNode *left = parse_unary(in, current_tok);
     if (!left) return NULL;
 
@@ -500,7 +571,6 @@ static ASTNode* parse_multiplicative(FILE *in, Token *current_tok) {
         MTokenType op = current_tok->type;
         *current_tok = next_token(in); 
 
-        /* Right-hand side must also evaluate unary/postfix expressions */
         ASTNode *right = parse_unary(in, current_tok);
         if (!right) {
             free_ast(left);
@@ -515,6 +585,7 @@ static ASTNode* parse_multiplicative(FILE *in, Token *current_tok) {
     }
     return left;
 }
+
 static ASTNode* parse_expression(FILE *in, Token *current_tok) {
     ASTNode *left = parse_multiplicative(in, current_tok);
     if (!left) return NULL;
@@ -546,31 +617,37 @@ static ASTNode* parse_relational(FILE *in, Token *current_tok) {
            current_tok->type == TOKEN_LT || current_tok->type == TOKEN_GT ||
            current_tok->type == TOKEN_LTE || current_tok->type == TOKEN_GTE) {
             
-            MTokenType op = current_tok->type; 
-            *current_tok = next_token(in); 
-            
-            ASTNode *right = parse_expression(in, current_tok);
-            if (!right) {
-                free_ast(left);
-                return NULL;
-            }
-            
-            ASTNodeType node_type;
-            switch (op) {
-                case TOKEN_EQ: node_type = NODE_EQ; break;
-                case TOKEN_NEQ: node_type = NODE_NEQ; break;
-                case TOKEN_LT: node_type = NODE_LT; break;
-                case TOKEN_GT: node_type = NODE_GT; break;
-                case TOKEN_LTE: node_type = NODE_LTE; break;
-                case TOKEN_GTE: node_type = NODE_GTE; break;
-                default: node_type = NODE_EQ; break;
-            }
-            left = create_binary_node(node_type, left, right);
+        MTokenType op = current_tok->type; 
+        *current_tok = next_token(in); 
+        
+        ASTNode *right = parse_expression(in, current_tok);
+        if (!right) {
+            free_ast(left);
+            return NULL;
         }
-        return left;
+        
+        ASTNodeType node_type;
+        switch (op) {
+            case TOKEN_EQ:  node_type = NODE_EQ; break;
+            case TOKEN_NEQ: node_type = NODE_NEQ; break;
+            case TOKEN_LT:  node_type = NODE_LT; break;
+            case TOKEN_GT:  node_type = NODE_GT; break;
+            case TOKEN_LTE: node_type = NODE_LTE; break;
+            case TOKEN_GTE: node_type = NODE_GTE; break;
+            default:        node_type = NODE_EQ; break;
+        }
+        left = create_binary_node(node_type, left, right);
+    }
+    return left;
 }
 
 static ASTNode* parse_statement_or_block(FILE *in, Token *current_tok) {
+    Token local_tok;
+    if (!current_tok) {
+        local_tok = next_token(in);
+        current_tok = &local_tok;
+    }
+
     if (current_tok->type == TOKEN_LBRACE) {
         *current_tok = next_token(in); 
         ASTNode **stmts = NULL;
@@ -582,9 +659,9 @@ static ASTNode* parse_statement_or_block(FILE *in, Token *current_tok) {
             if (stmt) {
                 if (count >= capacity) {
                     capacity = (capacity == 0) ? 4 : capacity * 2;
-                    ASTNode **new_stmts = realloc(stmts, sizeof(ASTNode*) * capacity);
+                    ASTNode **new_stmts = (ASTNode **)realloc(stmts, sizeof(ASTNode*) * capacity);
                     if (!new_stmts) { 
-                        free(stmts); exit(1); 
+                        free(stmts); exit(EXIT_FAILURE); 
                     }
                     stmts = new_stmts;
                 }
@@ -594,7 +671,6 @@ static ASTNode* parse_statement_or_block(FILE *in, Token *current_tok) {
         
         if (current_tok->type == TOKEN_RBRACE) {
             *current_tok = next_token(in); 
-            
             if (current_tok->type == TOKEN_SEMICOLON) {
                 *current_tok = next_token(in);
             }
@@ -645,13 +721,13 @@ static ASTNode* parse_if_statement(FILE *in, Token *current_tok) {
 }
 
 static ASTNode* parse_while_statement(FILE *in, Token *current_tok) {
-    *current_tok = next_token(in); // Consume 'while'
+    *current_tok = next_token(in); 
 
     if (current_tok->type != TOKEN_LPAREN) {
         printf("[Kaoru Syntax Error Line %u]: Expected '(' after 'while'\n", current_tok->line);
         return NULL;
     }
-    *current_tok = next_token(in); // Consume '('
+    *current_tok = next_token(in); 
 
     ASTNode *cond = parse_relational(in, current_tok);
     if (!cond) return NULL;
@@ -661,7 +737,7 @@ static ASTNode* parse_while_statement(FILE *in, Token *current_tok) {
         free_ast(cond);
         return NULL;
     }
-    *current_tok = next_token(in); // Consume ')'
+    *current_tok = next_token(in); 
 
     ASTNode *body = parse_statement_or_block(in, current_tok);
     if (!body) {
@@ -716,7 +792,7 @@ static ASTNode* parse_for_statement(FILE *in, Token *current_tok) {
 }
 
 static ASTNode* parse_func_decl(FILE *in, Token *current_tok) {
-    *current_tok = next_token(in); // consume '@func' or 'TOKEN_FUNC'
+    *current_tok = next_token(in);
 
     if (current_tok->type != TOKEN_IDENTIFIER) {
         printf("[Kaoru Syntax Error Line %u]: Expected function name\n", current_tok->line);
@@ -745,7 +821,7 @@ static ASTNode* parse_func_decl(FILE *in, Token *current_tok) {
             }
             if (param_count >= capacity) {
                 capacity = (capacity == 0) ? 4 : capacity * 2;
-                params = realloc(params, sizeof(char*) * capacity);
+                params = (char **)realloc(params, sizeof(char*) * capacity);
             }
             params[param_count] = strdup(current_tok->value);
             param_count++;
@@ -769,141 +845,12 @@ static ASTNode* parse_func_decl(FILE *in, Token *current_tok) {
     ASTNode *body = parse_statement_or_block(in, current_tok);
     return create_func_decl_node(func_name, params, param_count, body);
 }
-static ASTNode* parse_postfix(FILE *in, Token *current_tok) {
-    ASTNode *node = parse_primary(in, current_tok);
-    if (!node) return NULL;
 
-    while (1) {
-        /* Array/Offset Access: arr[i] */
-        if (current_tok->type == TOKEN_LBRACKET) {
-            *current_tok = next_token(in); // Consume '['
-            ASTNode *index = parse_expression(in, current_tok);
-            if (current_tok->type != TOKEN_RBRACKET) {
-                printf("[Kaoru Syntax Error Line %u]: Expected ']'\n", current_tok->line);
-                free_ast(node);
-                free_ast(index);
-                return NULL;
-            }
-            *current_tok = next_token(in); // Consume ']'
-            node = create_index_node(node, index);
-        }
-        /* Member Access via Pointer: p->field or p.field */
-        else if (current_tok->type == TOKEN_ARROW || current_tok->type == TOKEN_DOT) {
-            bool is_arrow = (current_tok->type == TOKEN_ARROW);
-            *current_tok = next_token(in); // Consume '->' or '.'
-            
-            if (current_tok->type != TOKEN_IDENTIFIER) {
-                printf("[Kaoru Syntax Error Line %u]: Expected member name\n", current_tok->line);
-                free_ast(node);
-                return NULL;
-            }
-            
-            char field_name[32];
-            strncpy(field_name, current_tok->value, sizeof(field_name) - 1);
-            field_name[sizeof(field_name) - 1] = '\0';
-            *current_tok = next_token(in); // Consume field name
-            
-            node = create_member_node(node, field_name, is_arrow);
-        } 
-        else {
-            break;
-        }
-    }
-    return node;
-}
-static ASTNode* parse_unary(FILE *in, Token *current_tok) {
-    /* Dereference: *p */
-    if (current_tok->type == TOKEN_STAR) {
-        *current_tok = next_token(in); // Consume '*'
-        ASTNode *operand = parse_unary(in, current_tok);
-        return create_unary_node(NODE_DEREF, operand);
-    }
-    /* Address-of: &x */
-    if (current_tok->type == TOKEN_AMP) {
-        *current_tok = next_token(in); // Consume '&'
-        ASTNode *operand = parse_unary(in, current_tok);
-        return create_unary_node(NODE_ADDR_OF, operand);
-    }
-
-    return parse_postfix(in, current_tok);
-}
-/* Shift Operators: <<, >> */
-static ASTNode* parse_shift(FILE *in, Token *current_tok) {
-    ASTNode *left = parse_multiplicative(in, current_tok);
-    if (!left) return NULL;
-
-    while (current_tok->type == TOKEN_SHL || current_tok->type == TOKEN_SHR) {
-        MTokenType op = current_tok->type;
-        *current_tok = next_token(in);
-
-        ASTNode *right = parse_multiplicative(in, current_tok);
-        if (!right) {
-            free_ast(left);
-            return NULL;
-        }
-        ASTNodeType node_type = (op == TOKEN_SHL) ? NODE_SHL : NODE_SHR;
-        left = create_binary_node(node_type, left, right);
-    }
-    return left;
-}
-
-/* Bitwise AND: & */
-static ASTNode* parse_bit_and(FILE *in, Token *current_tok) {
-    ASTNode *left = parse_shift(in, current_tok);
-    if (!left) return NULL;
-
-    while (current_tok->type == TOKEN_AMP) {
-        *current_tok = next_token(in);
-        ASTNode *right = parse_shift(in, current_tok);
-        if (!right) {
-            free_ast(left);
-            return NULL;
-        }
-        left = create_binary_node(NODE_BIT_AND, left, right);
-    }
-    return left;
-}
-
-/* Bitwise XOR: ^ */
-static ASTNode* parse_bit_xor(FILE *in, Token *current_tok) {
-    ASTNode *left = parse_bit_and(in, current_tok);
-    if (!left) return NULL;
-
-    while (current_tok->type == TOKEN_CARET) {
-        *current_tok = next_token(in);
-        ASTNode *right = parse_bit_and(in, current_tok);
-        if (!right) {
-            free_ast(left);
-            return NULL;
-        }
-        left = create_binary_node(NODE_BIT_XOR, left, right);
-    }
-    return left;
-}
-
-/* Bitwise OR: | */
-static ASTNode* parse_bit_or(FILE *in, Token *current_tok) {
-    ASTNode *left = parse_bit_xor(in, current_tok);
-    if (!left) return NULL;
-    while (current_tok->type == TOKEN_PIPE) {
-        *current_tok = next_token(in);
-        ASTNode *right = parse_bit_xor(in, current_tok);
-        if (!right) {
-            free_ast(left);
-            return NULL;
-        }
-        left = create_binary_node(NODE_BIT_OR, left, right);
-    }
-    return left;
-}
-/* Consolidated Main Statement Router */
 static ASTNode* parse_statement(FILE *in, Token *current_tok) {
-    // 1. Standalone Scope Block `{ ... }`
     if (current_tok->type == TOKEN_LBRACE) {
         return parse_statement_or_block(in, current_tok);
     }
 
-    // 2. Control Flow Directives
     if (current_tok->type == TOKEN_IF) {
         return parse_if_statement(in, current_tok);
     }
@@ -914,7 +861,6 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
         return parse_for_statement(in, current_tok);
     }
 
-    // 3. Function Declarations & Return
     if (current_tok->type == TOKEN_AT_FUNC || current_tok->type == TOKEN_FUNC || strcmp(current_tok->value, "@func") == 0) {
         return parse_func_decl(in, current_tok);
     }
@@ -927,7 +873,6 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
         return create_return_node(expr);
     }
 
-    // 4. Print Directive
     if (current_tok->type == TOKEN_AT_PRINT) {
         *current_tok = next_token(in); 
         ASTNode *expr = parse_expression(in, current_tok);
@@ -939,10 +884,10 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
         return create_print_node(expr);
     }
 
-    // 5. Variable Declarations (@int, @str, @bool)
     if (current_tok->type == TOKEN_AT_INT || 
         current_tok->type == TOKEN_AT_STR || 
-        current_tok->type == TOKEN_AT_BOOL) {
+        current_tok->type == TOKEN_AT_BOOL ||
+        current_tok->type == TOKEN_AT_CHAR) {
         
         MTokenType var_type = current_tok->type;
         *current_tok = next_token(in); 
@@ -978,7 +923,6 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
         return create_var_decl_node(var_type, var_name, expr);
     }
 
-    // 6. System Primitives Directives (@write, @close, @free, etc.)
     if (current_tok->value[0] == '@') {
         const char *name = current_tok->value + 1;
         if ((int)resolve_builtin_kind(name) != -1) {
@@ -1002,13 +946,7 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
         if (current_tok->type == TOKEN_SEMICOLON) *current_tok = next_token(in);
         return create_panic_node(expr);
     }
-    if (current_tok->type == TOKEN_AT_SYS) {
-        *current_tok = next_token(in);
-        if (current_tok->type == TOKEN_SEMICOLON) *current_tok = next_token(in);
-        return NULL;
-    }
 
-    // 7. Expression Statement
     ASTNode *expr = parse_relational(in, current_tok);
     if (expr && current_tok->type == TOKEN_SEMICOLON) {
         *current_tok = next_token(in); 
@@ -1017,8 +955,8 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
     return expr;
 }
 
-/* Wrapper entry-point parser function */
 ASTNode* parse(FILE *in) {
+    if (!in) return NULL;
     Token tok = next_token(in);
     if (tok.type == TOKEN_EOF) return NULL;
 
@@ -1031,8 +969,8 @@ ASTNode* parse(FILE *in) {
         if (stmt) {
             if (count >= capacity) {
                 capacity = (capacity == 0) ? 4 : capacity * 2;
-                ASTNode **new_stmts = realloc(stmts, sizeof(ASTNode*) * capacity);
-                if (!new_stmts) { free(stmts); exit(1); }
+                ASTNode **new_stmts = (ASTNode **)realloc(stmts, sizeof(ASTNode*) * capacity);
+                if (!new_stmts) { free(stmts); exit(EXIT_FAILURE); }
                 stmts = new_stmts;
             }
             stmts[count++] = stmt;
