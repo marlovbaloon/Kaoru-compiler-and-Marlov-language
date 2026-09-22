@@ -1,135 +1,80 @@
-# Kaoru compiler and Marlov language
-A programming language built completely from scratch for my vocational diploma final project.(wip)
+# Kaoru Compiler (Marlov Language)
 
-
-# Marlov Language Specification
-
-### *"Marlov Language For Everyone"*
----
-
-## 1. Introduction & Architecture
-
-The **Marlov** language is a high-performance, system-level programming language driven by its core compiler, **Kaoru**. Its internal engine is built using Native C paired with x86-64 Inline Assembly (`cpuid`) to handle hardware-level security binding and direct memory management.
-
-The system supports two file types:
-
-* **`.mlov` (Header / Interface File):** Used for declaring structures, interfaces, and permission scopes.
-* **`.ml` (Implementation File):** Used for writing core application logic and routines.
+**Kaoru** is an experimental ahead-of-time (AOT) frontend and code-generation pipeline for the **Marlov Programming Language**. Designed with a strict "Readable First, Keep It Simple, Stupid (KISS), and No Over-Engineering" philosophy, Kaoru translates Marlov high-level source files (`.ml`) and header interface declarations (`.mlov`) into platform-native assembly (x86_64 and AArch64) with runtime hardware signature verification.
 
 ---
 
-## 2. Eserem Philosophy (ES.ER.EM) & Memory Management
+## 📌 Research Branch Notice: ARM Cortex-M Target
 
-The execution workflow of the Kaoru Compiler strictly adheres to the **Eserem** paradigm:
+> **Branch:** `research/arm-cortex-m-dag`
+> **Target Environment:** Bare-Metal Embedded Systems (ARM Cortex-M Series with High SRAM Constraints)
 
-* **ES — Everything is Structure:** Core data structures rely on C-based Abstract Syntax Tree nodes (`ASTNode`) to ensure stability, high performance, and seamless support for Recursive Descent Parsing.
-* **ER — Everything in RAM (Stack Scope vs. Explicit Heap):**
-* **Standard Curly Braces `{ }` (Normal Scope):** Operates identically to standard C, scoping variables on the Stack RAM.
-* **Semicolon-Terminated Braces `{ };` (Stack Release Trigger):** Instructs the Kaoru Compiler to emit the Assembly instruction `add rsp, N` to immediately flush the Stack Frame and reclaim RAM upon exiting the block, without relying on a Garbage Collector (Zero-GC).
+In safety-critical bare-metal environments, bounded memory footprints and strict dynamic analysis are paramount. Due to **Rice's Theorem**, proving non-trivial semantic properties (such as stack overflow guarantees or exact memory boundaries) on arbitrary recursive execution paths is undecidable.
 
-
-* **EM — Everything is Modular:** All code modules are isolated within an Isolation Sandbox, validated by a Security Gatekeeper before execution is authorized.
-
----
-
-## 3. Permission System & Hardware Binding (Security Context)
-
-Marlov enforces permission management via Bitmask Flags (`SecurityContext`). The `@sys` directive must be declared exclusively at the header of the source file.
-
-```marlov
-/-- Request disk read permission (minimum required by Kaoru to read source files) --/
-@sys.disk.read;
-
-```
-
-### Hardware Signature Verification
-
-1. When Kaoru initializes, the `get_hardware_signature()` function in `mcodegen.c` executes x86-64 Inline Assembly (`cpuid`) to extract Processor Serial/Info directly from the CPU.
-2. The retrieved data is processed using Bitwise XOR and Shift operations to compute a 64-bit Hardware Hash (`uint64_t`).
-3. If `@sys.disk.read` is missing from the header, the compiler terminates execution immediately (`Security Violation`).
-4. The generated Assembly code injects a register-level signature verification check. If the hardware footprint does not match the compiling machine, execution branches to `self_destruct` and triggers a `ud2` (Undefined Instruction) to immediately trigger a self-crash (Domain Collapse).
+To overcome this constraint in highly limited SRAM environments:
+* **Recursion Elimination:** The research branch enforces strict static analysis that forbids and eliminates recursive function calls at compile time.
+* **DAG-Based Lowering:** Control flow and call graphs are transformed into a **Directed Acyclic Graph (DAG)**.
+* **Bounded SRAM Guarantee:** Translating code paths into DAGs allows the compiler to compute exact static frame bounds and guarantee safe execution limits without dynamic stack runtime surprises.
 
 ---
 
-## 4. Syntax & Scope Lifecycle
+## Current Architecture & Features (Main Branch)
 
-### 4.1 Standard C-Style Scope `{ }`
-
-Used for standard control flow (e.g., functions, `if` statements, `while` loops) without releasing Stack memory immediately upon exiting the block.
-
-```marlov
-if (x > 0) {
-    @int temp = x;
-}
-
-```
-
-### 4.2 Immediate Stack Flush Block `{ };`
-
-Appending a semicolon `;` after a closing brace `}` triggers the compiler to call `scope_exit()`, calculating the current `stack_offset` and immediately reclaiming Stack RAM space.
-
-```marlov
-{
-    @int temp_data = 100;
-    /-- Work with temporary variable --/
-}; /-- Instantly flushes Stack Frame via `add rsp, N` --/
-
-```
+* **Dual Target Assembly Emission:** Generates assembly output supporting both `x86_64` (System V / Windows x64 ABI) and `AArch64` target architectures.
+* **Layered Pipeline:**
+  * **Lexer (`mlexer.c`):** Tokenizes Marlov directives (`@func`, `@print`, `@panic`, `@sys.disk.read`), operators, identifiers, and literals.
+  * **Parser (`mparser.c`):** Constructs AST representations for control flows (`if/else`, `while`, `for`), functions, pointers, and memory operations.
+  * **Symbol & Header Linking (`mlov` Interface):** Resolves interface definitions and exports external symbol linkages (`.global` / `.extern`).
+  * **Intermediate Representation (`mir.c` / `mir.h`):** Lowers AST to Medium-level IR with 8-byte stack frame alignment invariants (`Align8`).
+  * **Code Generator (`mcodegen.c`):** Outputs architecture-specific assembly routines and cross-platform hardware signature verification guards.
+* **Bare-Metal Memory & Pointer Primitives:** Full support for dereferencing (`*p`), address-of (`&x`), 8-bit byte-level loads/stores (`load_b`, `store_b`), and array indexing.
+* **Bitwise & Arithmetic Operations:** Supports arithmetic, relational, and low-level bitwise logic (`&`, `|`, `^`, `<<`, `>>`).
+* **Hardware Signature Guard:** Compiles hardware CPU fingerprint checks into target binaries (`cpuid`, MIDR_EL1, ARM p15) for execution authorization.
 
 ---
 
-## 5. Data Types & Variable Declarations
+## Source File Overview
 
-Static Type Checking at compile-time uses the `@` prefix symbol to explicitly declare types.
-
-```marlov
-/-- Variable Declarations --/
-@int player_speed = 100;       /-- 4-Byte Integer --/
-@str player_name = "Kaoru";    /-- String Literal Sequence --/
-
-/-- Arithmetic Expressions & Precedence --/
-@int total_score = 10 + 20 * 3; /-- Supports Operator Precedence (* / before + -) --/
-
-```
-
+```text
+/Kaoru Compiler
+├── main.c        # CLI driver, header/source parser launcher, file I/O dispatcher
+├── mtypes.h      # Core compiler types, AST node definitions, Token enums
+├── mlexer.c      # Lexical analyzer for Marlov syntax and directives
+├── mparser.c     # AST parser & Symbol table linkage implementation
+├── mir.h         # MIR opcodes and struct definitions
+├── mir.c         # Lowering AST into MIR representation
+└── mcodegen.c    # Machine assembly code generator (x86_64 & AArch64)
 ---
-
-## 6. Operators
-
-Kaoru's Parser uses a **Recursive Descent Parsing** approach to establish operator precedence:
-
-1. **Primary (`parse_primary`):** Numeric literals (`TOKEN_NUMBER`), string literals (`TOKEN_STRING_LIT`), and variable identifiers (`TOKEN_IDENTIFIER`).
-2. **Multiplicative (`parse_multiplicative`):** Multiplication `*` and Division `/` (higher precedence).
-3. **Additive (`parse_expression`):** Addition `+` and Subtraction `-` (lower precedence).
-
+## Building & Usage
 ---
+Prerequisites
+Standard C compiler (gcc or clang) with C99 support.
 
-## 7. Kaoru Compiler Pipeline Summary
+Compilation
+Compile the Kaoru frontend compiler driver:
 
-| Marlov Syntax | Token (`mtypes.h`) | AST Node Creation (`mparser.c`) | Compiler Behavior |
-| --- | --- | --- | --- |
-| `@sys.disk.read;` | `TOKEN_AT_SYS` | `parse_program()` | Sets Bitmask `PERM_DISK_READ` (`0x01`) |
-| `@int x = 10;` | `TOKEN_AT_INT` | `create_var_decl_node()` | Allocates symbol on Stack & creates `NODE_VAR_DECL` AST Node |
-| `10 + 20 * 3;` | `TOKEN_PLUS`, `TOKEN_STAR` | `create_add_node()`, `create_mul_node()` | Folds into Binary Tree based on Operator Precedence |
-| `{ }` | `TOKEN_LBRACE`, `TOKEN_RBRACE` | `parse_block()` | Generates standard C-style scope |
-| `{ };` | `TOKEN_RBRACE` + `TOKEN_SEMICOLON` | `scope_exit()` | Emits instructions to shift Stack Pointer and release RAM instantly |
+Bash
+gcc -std=c99 -O2 main.c -o kaoru
+Execution
+To compile a Marlov source file (.ml) with an optional header interface (.mlov):
 
+Bash
+# Basic Compilation
+./kaoru source.ml -o output.s
+
+# Compilation with Header Interface
+./kaoru source.ml -include interface.mlov -o output.s
+
+# Inspect AST Structure
+./kaoru source.ml --dump-ast
 ---
+## Marlov Language Directives Quick Reference
+@func <name>(<args>) { ... }: Function declaration.
 
-## 8. Valid Marlov Code Sample (Parser & Security Compliant)
+@print(<expr>): Print string or integer values to standard output.
 
-```marlov
-/-- 1. File header must explicitly request disk read permissions --/
-@sys.disk.read;
+@sys.disk.read: Security permission directive.
 
-/-- 2. Entry point and execution scope --/
-{
-    /-- Variable declaration and precedence-based expression evaluation --/
-    @int base_damage = 50;
-    @int bonus = 10 * 2;
-    @int total_damage = base_damage + bonus;
-    
-    @str status = "READY";
-}; /-- Exits block and flushes Stack Frame, immediately releasing RAM --/
+@panic(<msg>): Trigger runtime error diagnostic trap.
 
-```
+@exit(<code>): Terminate process execution.
