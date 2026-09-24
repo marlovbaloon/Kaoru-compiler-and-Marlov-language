@@ -66,7 +66,20 @@ static BuiltinKind resolve_builtin_kind(const char *name) {
     if (strcmp(name, "store_b") == 0) return BUILTIN_STORE8;
     return (BuiltinKind)-1;
 }
-
+// allocation helper
+static ASTNode *ast_node_alloc(ASTArena *arena) {
+    if (arena && arena->count < arena->capacity) {
+        ASTNode *node = &arena->nodes[arena->count++];
+        memset(node, 0, sizeof(ASTNode));
+        return node;
+    }
+    ASTNode *node = (ASTNode *)calloc(1, sizeof(ASTNode));
+    if (!node) {
+        fprintf(stderr, "Fatal Error: Out of memory for ASTNode\n");
+        exit(1);
+    }
+    return node;
+}
 /* =========================================================================
  * AST Node Creation Helpers
  * ========================================================================= */
@@ -235,7 +248,95 @@ ASTNode* create_builtin_node(BuiltinKind kind, ASTNode **args, int arg_count) {
     node->arg_count = arg_count;
     return node;
 }
+/* 1. Extended Bitwise & Shift Nodes */
+ASTNode *make_node_bitwise(ASTArena *arena, ASTNodeType type, ASTNode *left, ASTNode *right) {
+    ASTNode *node = ast_node_alloc(arena);
+    node->type = type; /* NODE_BIT_AND, NODE_BIT_OR, NODE_BIT_XOR, NODE_SHL, NODE_SHR */
+    node->left = left;
+    node->right = right;
+    return node;
+}
 
+/* 2. Pointer operations (Deref, Address-of, Index) */
+ASTNode *make_node_addr_of(ASTArena *arena, ASTNode *target) {
+    ASTNode *node = ast_node_alloc(arena);
+    node->type = NODE_ADDR_OF;
+    node->ptr = target;
+    return node;
+}
+
+ASTNode *make_node_deref(ASTArena *arena, ASTNode *ptr) {
+    ASTNode *node = ast_node_alloc(arena);
+    node->type = NODE_DEREF;
+    node->ptr = ptr;
+    return node;
+}
+
+ASTNode *make_node_index(ASTArena *arena, ASTNode *ptr, ASTNode *offset) {
+    ASTNode *node = ast_node_alloc(arena);
+    node->type = NODE_INDEX;
+    node->ptr = ptr;
+    node->offset = offset;
+    return node;
+}
+
+ASTNode *make_node_assign_ptr(ASTArena *arena, ASTNode *ptr, ASTNode *value) {
+    ASTNode *node = ast_node_alloc(arena);
+    node->type = NODE_ASSIGN_PTR;
+    node->ptr = ptr;
+    node->right = value;
+    return node;
+}
+
+/* 3. Struct & Member Access Nodes */
+ASTNode *make_node_member_ref(ASTArena *arena, ASTNode *ptr, const char *member_name, int offset) {
+    ASTNode *node = ast_node_alloc(arena);
+    node->type = NODE_MEMBER_REF;
+    node->ptr = ptr;
+    if (member_name) {
+        strncpy(node->member_name, member_name, sizeof(node->member_name) - 1);
+    }
+    node->member_offset = offset;
+    return node;
+}
+
+/* 4. Bare-metal / Low-level Memory Primitives (Byte Operations) */
+ASTNode *make_node_char(ASTArena *arena, char ch) {
+    ASTNode *node = ast_node_alloc(arena);
+    node->type = NODE_CHAR;
+    node->val = (int)ch;
+    node->is_byte_op = true;
+    return node;
+}
+
+ASTNode *make_node_load_byte(ASTArena *arena, ASTNode *ptr, ASTNode *offset) {
+    ASTNode *node = ast_node_alloc(arena);
+    node->type = NODE_LOAD_BYTE;
+    node->ptr = ptr;
+    node->offset = offset;
+    node->is_byte_op = true;
+    return node;
+}
+
+ASTNode *make_node_store_byte(ASTArena *arena, ASTNode *ptr, ASTNode *offset, ASTNode *value) {
+    ASTNode *node = ast_node_alloc(arena);
+    node->type = NODE_STORE_BYTE;
+    node->ptr = ptr;
+    node->offset = offset;
+    node->right = value;
+    node->is_byte_op = true;
+    return node;
+}
+
+/* 5. Builtin Call Node */
+ASTNode *make_node_builtin(ASTArena *arena, BuiltinKind kind, ASTNode **args, int arg_count) {
+    ASTNode *node = ast_node_alloc(arena);
+    node->type = NODE_BUILTIN_CALL;
+    node->builtin_kind = kind;
+    node->args = args;
+    node->arg_count = arg_count;
+    return node;
+}
 void free_ast(ASTNode *node) {
     if (!node) return;
     

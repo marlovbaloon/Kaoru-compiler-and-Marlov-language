@@ -14,10 +14,6 @@ struct ScopeContext {
     ScopeContext *parent;
 };
 
-/* Formula 2: Hardware 8-Byte Alignment Operator */
-size_t align8(size_t x) {
-    return (x + 7) & ~((size_t)7);
-}
 
 /* Formula 3: Frame Allocation Metric Function */
 size_t size_of_scope(ASTNode *block) {

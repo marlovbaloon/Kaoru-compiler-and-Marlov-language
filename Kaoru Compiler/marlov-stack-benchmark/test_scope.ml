@@ -4,7 +4,7 @@
         @int b = 2;
         if (a == b) {
             @int c = 3;
-            return;
+            return 0;
         }
     }
 }

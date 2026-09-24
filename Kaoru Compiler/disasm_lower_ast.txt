@@ -1,0 +1,101 @@
+0000000140007840 <lower_ast_node>:
+   140007840:	48 8b 44 24 28       	mov    0x28(%rsp),%rax
+   140007845:	4c 8b 54 24 30       	mov    0x30(%rsp),%r10
+   14000784a:	48 85 c9             	test   %rcx,%rcx
+   14000784d:	74 19                	je     140007868 <lower_ast_node+0x28>
+   14000784f:	48 85 d2             	test   %rdx,%rdx
+   140007852:	74 14                	je     140007868 <lower_ast_node+0x28>
+   140007854:	4c 89 54 24 30       	mov    %r10,0x30(%rsp)
+   140007859:	48 89 44 24 28       	mov    %rax,0x28(%rsp)
+   14000785e:	e9 1d ea ff ff       	jmp    140006280 <lower_ast_node.part.0>
+   140007863:	0f 1f 44 00 00       	nopl   0x0(%rax,%rax,1)
+   140007868:	c3                   	ret
+   140007869:	0f 1f 80 00 00 00 00 	nopl   0x0(%rax)
+
+0000000140007870 <generate_ir>:
+   140007870:	56                   	push   %rsi
+   140007871:	53                   	push   %rbx
+   140007872:	48 83 ec 48          	sub    $0x48,%rsp
+   140007876:	ba 18 00 00 00       	mov    $0x18,%edx
+   14000787b:	48 89 ce             	mov    %rcx,%rsi
+   14000787e:	b9 01 00 00 00       	mov    $0x1,%ecx
+   140007883:	e8 c8 d4 00 00       	call   140014d50 <calloc>
+   140007888:	48 89 c3             	mov    %rax,%rbx
+   14000788b:	48 85 c0             	test   %rax,%rax
+   14000788e:	74 3c                	je     1400078cc <generate_ir+0x5c>
+   140007890:	c7 44 24 3c 00 00 00 	movl   $0x0,0x3c(%rsp)
+   140007897:	00 
+   140007898:	48 85 f6             	test   %rsi,%rsi
+   14000789b:	74 25                	je     1400078c2 <generate_ir+0x52>
+   14000789d:	4c 8d 4c 24 3c       	lea    0x3c(%rsp),%r9
+   1400078a2:	45 31 c0             	xor    %r8d,%r8d
+   1400078a5:	48 89 c2             	mov    %rax,%rdx
+   1400078a8:	48 89 f1             	mov    %rsi,%rcx
+   1400078ab:	48 c7 44 24 28 00 00 	movq   $0x0,0x28(%rsp)
+   1400078b2:	00 00 
+   1400078b4:	48 c7 44 24 20 00 00 	movq   $0x0,0x20(%rsp)
+   1400078bb:	00 00 
+   1400078bd:	e8 be e9 ff ff       	call   140006280 <lower_ast_node.part.0>
+   1400078c2:	48 89 d8             	mov    %rbx,%rax
+   1400078c5:	48 83 c4 48          	add    $0x48,%rsp
+   1400078c9:	5b                   	pop    %rbx
+   1400078ca:	5e                   	pop    %rsi
+   1400078cb:	c3                   	ret
+   1400078cc:	b9 02 00 00 00       	mov    $0x2,%ecx
+   1400078d1:	ff 15 29 e8 00 00    	call   *0xe829(%rip)        # 140016100 <__imp___acrt_iob_func>
+   1400078d7:	48 8d 15 2a 11 01 00 	lea    0x1112a(%rip),%rdx        # 140018a08 <.rdata+0x128>
+   1400078de:	48 89 c1             	mov    %rax,%rcx
+   1400078e1:	e8 7a e8 ff ff       	call   140006160 <fprintf>
+   1400078e6:	b9 01 00 00 00       	mov    $0x1,%ecx
+   1400078eb:	e8 68 d4 00 00       	call   140014d58 <exit>
+   1400078f0:	90                   	nop
+   1400078f1:	66 66 2e 0f 1f 84 00 	data16 cs nopw 0x0(%rax,%rax,1)
+   1400078f8:	00 00 00 00 
+   1400078fc:	0f 1f 40 00          	nopl   0x0(%rax)
+
+0000000140007900 <free_ir>:
+   140007900:	56                   	push   %rsi
+   140007901:	53                   	push   %rbx
+   140007902:	48 83 ec 28          	sub    $0x28,%rsp
+   140007906:	48 89 ce             	mov    %rcx,%rsi
+   140007909:	48 85 c9             	test   %rcx,%rcx
+   14000790c:	74 32                	je     140007940 <free_ir+0x40>
+   14000790e:	48 8b 19             	mov    (%rcx),%rbx
+   140007911:	48 85 db             	test   %rbx,%rbx
+   140007914:	74 1b                	je     140007931 <free_ir+0x31>
+   140007916:	66 2e 0f 1f 84 00 00 	cs nopw 0x0(%rax,%rax,1)
+   14000791d:	00 00 00 
+   140007920:	48 89 d9             	mov    %rbx,%rcx
+   140007923:	48 8b 5b 70          	mov    0x70(%rbx),%rbx
+   140007927:	e8 64 d4 00 00       	call   140014d90 <free>
+   14000792c:	48 85 db             	test   %rbx,%rbx
+   14000792f:	75 ef                	jne    140007920 <free_ir+0x20>
+   140007931:	48 89 f1             	mov    %rsi,%rcx
+   140007934:	48 83 c4 28          	add    $0x28,%rsp
+   140007938:	5b                   	pop    %rbx
+   140007939:	5e                   	pop    %rsi
+   14000793a:	e9 51 d4 00 00       	jmp    140014d90 <free>
+   14000793f:	90                   	nop
+   140007940:	48 83 c4 28          	add    $0x28,%rsp
+   140007944:	5b                   	pop    %rbx
+   140007945:	5e                   	pop    %rsi
+   140007946:	c3                   	ret
+   140007947:	66 0f 1f 84 00 00 00 	nopw   0x0(%rax,%rax,1)
+   14000794e:	00 00 
+
+0000000140007950 <print_ir>:
+   140007950:	56                   	push   %rsi
+   140007951:	53                   	push   %rbx
+   140007952:	48 83 ec 28          	sub    $0x28,%rsp
+   140007956:	48 85 c9             	test   %rcx,%rcx
+   140007959:	74 4e                	je     1400079a9 <print_ir+0x59>
+   14000795b:	48 8b 19             	mov    (%rcx),%rbx
+   14000795e:	48 85 db             	test   %rbx,%rbx
+   140007961:	74 46                	je     1400079a9 <print_ir+0x59>
+   140007963:	48 8d 35 72 12 01 00 	lea    0x11272(%rip),%rsi        # 140018bdc <.rdata+0x2fc>
+   14000796a:	66 0f 1f 44 00 00    	nopw   0x0(%rax,%rax,1)
+   140007970:	8b 13                	mov    (%rbx),%edx
+   140007972:	83 fa 13             	cmp    $0x13,%edx
+   140007975:	0f 87 2d 02 00 00    	ja     140007ba8 <print_ir+0x258>
+   14000797b:	89 d0                	mov    %edx,%eax
+   14000797d:	48 63 04 86          	movslq (%rsi,%rax,4),%rax

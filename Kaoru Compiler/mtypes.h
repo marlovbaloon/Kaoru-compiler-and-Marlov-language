@@ -1,4 +1,3 @@
-// mtypes.h
 #ifndef MTYPES_H
 #define MTYPES_H
 
@@ -114,6 +113,11 @@ typedef struct ASTNode {
     char str_val[68];
     char var_name[32];
     
+    /* Code Generation & Frame Layout Fields */
+    int stack_offset;              /* Local variable/expr stack frame offset relative to RBP/FP */
+    int local_stack_size;          /* Total local stack allocation size for function */
+    int *param_stack_offsets;      /* Array of offsets for function parameters */
+
     /* Binary & Control Tree Links */
     struct ASTNode *left;
     struct ASTNode *right;
@@ -164,6 +168,7 @@ typedef enum {
     SYM_VARIABLE,
     SYM_STRUCT
 } SymbolKind;
+
 typedef struct Symbol {
     char name[64];
     SymbolKind kind;
@@ -173,7 +178,6 @@ typedef struct Symbol {
     size_t data_size;  /* Data size: 1 byte (char), 8 bytes (int/ptr) */
     struct Symbol *next;
 } Symbol;
-
 
 typedef struct {
     Symbol *head;

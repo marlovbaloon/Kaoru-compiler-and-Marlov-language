@@ -32,10 +32,8 @@ void emit_symbol_linkage(FILE *out, SymbolTable *symtab) {
     Symbol *curr = symtab->head;
     while (curr) {
         if (curr->is_declared && !curr->is_defined) {
-            /* Declared in .mlov but not defined in this .ml -> Mark as EXTERN for Assembly */
             fprintf(out, "    .extern %s\n", curr->name);
         } else if (curr->is_defined) {
-            /* Defined in this .ml -> Export as GLOBAL */
             fprintf(out, "    .global %s\n", curr->name);
         }
         curr = curr->next;
@@ -106,7 +104,7 @@ void generate_runtime_header(FILE *out, SecurityContext *sec_ctx) {
     fprintf(out, "// --- KAORU RUNTIME SECURITY GUARD (EMBEDDED IN TARGET BINARY) ---\n");
     fprintf(out, "#include <stdio.h>\n");
     fprintf(out, "#include <stdlib.h>\n");
-    fprintf(out, "#include <stdbool.h>\n\n");
+    fprintf(out, "#include <stdbool.\n\n");
     
     if (sec_ctx) {
         fprintf(out, "static const unsigned long long AUTHORIZED_HARDWARE_HASH = 0x%llXULL;\n", 
@@ -125,22 +123,18 @@ void generate_runtime_header(FILE *out, SecurityContext *sec_ctx) {
 }
 
 void generate_assembly_entry(FILE *out, SecurityContext *ctx) {
-    (void)ctx; /* Unused here: No longer trap during compilation */
+    (void)ctx;
 
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, ".global main\n");
     fprintf(out, "main:\n");
     fprintf(out, "    push rbp\n");
     fprintf(out, "    mov rbp, rsp\n");
-    fprintf(out, "    ; Optional: Call Runtime Hardware Guard Check\n");
-    fprintf(out, "    ; call verify_hardware_and_permissions\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
     fprintf(out, ".global main\n");
     fprintf(out, "main:\n");
     fprintf(out, "    stp x29, x30, [sp, #-16]!\n");
     fprintf(out, "    mov x29, sp\n");
-    fprintf(out, "    ; Optional: Call Runtime Hardware Guard Check\n");
-    fprintf(out, "    ; bl verify_hardware_and_permissions\n");
 #endif
 }
 
@@ -184,11 +178,23 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 
         case NODE_VAR_REF:
             fprintf(out, "    ; Symbol reference: %s\n", node->var_name);
+#if defined(__x86_64__) || defined(_M_X64)
+            fprintf(out, "    mov rax, [rbp - %d]\n", node->stack_offset);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+            fprintf(out, "    ldr x0, [x29, #-%d]\n", node->stack_offset);
+#endif
             break;
 
         case NODE_VAR_DECL:
-            generate_code_from_ast(out, node->left, sec_ctx);
-            fprintf(out, "    ; Variable Decl: %s initialized\n", node->var_name);
+            if (node->left) {
+                generate_code_from_ast(out, node->left, sec_ctx);
+            }
+            fprintf(out, "    ; Variable Decl: %s initialized at offset -%d\n", node->var_name, node->stack_offset);
+#if defined(__x86_64__) || defined(_M_X64)
+            fprintf(out, "    mov [rbp - %d], rax\n", node->stack_offset);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+            fprintf(out, "    str x0, [x29, #-%d]\n", node->stack_offset);
+#endif
             break;
 
         case NODE_BLOCK:
@@ -301,18 +307,36 @@ void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
     fprintf(out, "\n.global %s\n", node->var_name);
     fprintf(out, "%s:\n", node->var_name);
 
+    /* Calculate frame size (aligned to 16 bytes for System V ABI / ARM64) */
+    int raw_stack_size = node->local_stack_size;
+    int aligned_stack_size = (raw_stack_size + 15) & ~15;
+
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, "    push rbp\n");
     fprintf(out, "    mov rbp, rsp\n");
+    if (aligned_stack_size > 0) {
+        fprintf(out, "    sub rsp, %d\n", aligned_stack_size);
+    }
 #elif defined(__aarch64__) || defined(_M_ARM64)
     fprintf(out, "    stp x29, x30, [sp, #-16]!\n");
     fprintf(out, "    mov x29, sp\n");
+    if (aligned_stack_size > 0) {
+        fprintf(out, "    sub sp, sp, #%d\n", aligned_stack_size);
+    }
 #endif
 
     fprintf(out, "    ; Bind parameters (%d count)\n", node->param_count);
     for (int i = 0; i < node->param_count; i++) {
         if (i < 6) {
             fprintf(out, "    ; param [%s] passed via %s\n", node->params[i], ARG_REGS[i]);
+            /* Optional: Store arguments into parameter stack slots if stack_offset is mapped */
+            if (node->param_stack_offsets && node->param_stack_offsets[i] > 0) {
+#if defined(__x86_64__) || defined(_M_X64)
+                fprintf(out, "    mov [rbp - %d], %s\n", node->param_stack_offsets[i], ARG_REGS[i]);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+                fprintf(out, "    str %s, [x29, #-%d]\n", ARG_REGS[i], node->param_stack_offsets[i]);
+#endif
+            }
         }
     }
 
@@ -325,6 +349,7 @@ void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
     fprintf(out, "    pop rbp\n");
     fprintf(out, "    ret\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    mov sp, x29\n");
     fprintf(out, "    ldp x29, x30, [sp], #16\n");
     fprintf(out, "    ret\n");
 #endif
@@ -357,7 +382,19 @@ void generate_func_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
     }
 
 #if defined(__x86_64__) || defined(_M_X64)
+    /* Stack alignment check and cleanup if args > 6 */
+    if (node->arg_count > 6) {
+        int stack_args = node->arg_count - 6;
+        if (stack_args % 2 != 0) {
+            fprintf(out, "    sub rsp, 8\n"); // Keep 16-byte alignment
+        }
+    }
     fprintf(out, "    call %s\n", node->var_name);
+    if (node->arg_count > 6) {
+        int stack_args = node->arg_count - 6;
+        int bytes = (stack_args % 2 != 0) ? (stack_args + 1) * 8 : stack_args * 8;
+        fprintf(out, "    add rsp, %d\n", bytes);
+    }
 #elif defined(__aarch64__) || defined(_M_ARM64)
     fprintf(out, "    bl %s\n", node->var_name);
 #endif
@@ -376,6 +413,7 @@ void generate_return_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     fprintf(out, "    pop rbp\n");
     fprintf(out, "    ret\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
+    fprintf(out, "    mov sp, x29\n");
     fprintf(out, "    ldp x29, x30, [sp], #16\n");
     fprintf(out, "    ret\n");
 #endif
@@ -389,7 +427,6 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
 
     fprintf(out, "    ; --- Directives Call: Builtin %d ---\n", node->builtin_kind);
 
-    /* 1. Special Handling: Builtins that do not follow standard C call flow */
     if (node->builtin_kind == BUILTIN_SIZEOF) {
         fprintf(out, "    ; Builtin sizeof evaluation\n");
 #if defined(__x86_64__) || defined(_M_X64)
@@ -415,7 +452,6 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
         return;
     }
 
-    /* 2. Standard C-Call Builtins: Push arguments */
     for (int i = 0; i < node->arg_count; i++) {
         generate_code_from_ast(out, node->args[i], sec_ctx);
 #if defined(__x86_64__) || defined(_M_X64)
@@ -425,7 +461,6 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
 #endif
     }
 
-    /* 3. Pop arguments into ABI registers */
     for (int i = node->arg_count - 1; i >= 0; i--) {
         if (i < 6) {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -436,7 +471,6 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
         }
     }
 
-    /* 4. Resolve Target Function Name */
     const char *target_func = NULL;
     switch (node->builtin_kind) {
         case BUILTIN_OPEN:   target_func = "fopen"; break;
@@ -451,7 +485,6 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
             return;
     }
 
-    /* 5. Emit Call Instruction */
     if (target_func) {
 #if defined(__x86_64__) || defined(_M_X64)
         fprintf(out, "    call %s\n", target_func);
@@ -622,7 +655,6 @@ void generate_unary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 
     switch (node->type) {
         case NODE_DEREF:
-            /* Evaluate address expression into result register */
             generate_code_from_ast(out, node->left, sec_ctx);
             fprintf(out, "    ; --- Dereference Pointer (*p) ---\n");
 #if defined(__x86_64__) || defined(_M_X64)
@@ -633,14 +665,12 @@ void generate_unary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
             break;
 
         case NODE_ADDR_OF:
-            /* Note: Assumes variable reference or lvalue in left node */
             fprintf(out, "    ; --- Address Of (&var) ---\n");
             if (node->left && node->left->type == NODE_VAR_REF) {
 #if defined(__x86_64__) || defined(_M_X64)
-                /* Local variable stack frame address computation */
-                fprintf(out, "    lea rax, [rbp - %d]\n", node->left->val); 
+                fprintf(out, "    lea rax, [rbp - %d]\n", node->left->stack_offset); 
 #elif defined(__aarch64__) || defined(_M_ARM64)
-                fprintf(out, "    sub x0, x29, #%d\n", node->left->val);
+                fprintf(out, "    sub x0, x29, #%d\n", node->left->stack_offset);
 #endif
             }
             break;
@@ -657,7 +687,6 @@ void generate_index_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_INDEX) return;
 
     fprintf(out, "    ; --- Array Indexing / Pointer Offset Access ---\n");
-    /* Evaluate Index expression */
     generate_code_from_ast(out, node->right, sec_ctx);
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, "    push rax\n");
@@ -665,12 +694,10 @@ void generate_index_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     fprintf(out, "    str x0, [sp, #-16]!\n");
 #endif
 
-    /* Evaluate Base Pointer address */
     generate_code_from_ast(out, node->left, sec_ctx);
 
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, "    pop rbx\n");
-    /* Multiply index by element size (default 8 bytes for 64-bit pointers) */
     fprintf(out, "    shl rbx, 3\n");
     fprintf(out, "    add rax, rbx\n");
     fprintf(out, "    mov rax, [rax]\n");
@@ -689,7 +716,6 @@ void generate_byte_access_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx
     if (!node) return;
 
     if (node->type == NODE_LOAD_BYTE) {
-        /* Read uint8_t / char from memory address */
         generate_code_from_ast(out, node->left, sec_ctx);
         fprintf(out, "    ; --- Load Byte (8-bit Read) ---\n");
 #if defined(__x86_64__) || defined(_M_X64)
@@ -698,15 +724,14 @@ void generate_byte_access_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx
         fprintf(out, "    ldrb w0, [x0]\n");
 #endif
     } else if (node->type == NODE_STORE_BYTE) {
-        /* Write uint8_t value to target address: store_b(addr, val) */
-        generate_code_from_ast(out, node->right, sec_ctx); // Value to store
+        generate_code_from_ast(out, node->right, sec_ctx);
 #if defined(__x86_64__) || defined(_M_X64)
         fprintf(out, "    push rax\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
         fprintf(out, "    str x0, [sp, #-16]!\n");
 #endif
 
-        generate_code_from_ast(out, node->left, sec_ctx); // Target Address
+        generate_code_from_ast(out, node->left, sec_ctx);
 
 #if defined(__x86_64__) || defined(_M_X64)
         fprintf(out, "    pop rbx\n");
@@ -742,7 +767,6 @@ void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             fprintf(out, "    idiv rbx\n"); 
             break;
 
-        /* Bitwise Logic Operations */
         case NODE_BIT_AND: fprintf(out, "    and rax, rbx\n"); break;
         case NODE_BIT_OR:  fprintf(out, "    or rax, rbx\n"); break;
         case NODE_BIT_XOR: fprintf(out, "    xor rax, rbx\n"); break;
@@ -784,7 +808,6 @@ void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
         case NODE_MUL: fprintf(out, "    mul x0, x0, x1\n"); break;
         case NODE_DIV: fprintf(out, "    sdiv x0, x0, x1\n"); break;
 
-        /* Bitwise Logic Operations */
         case NODE_BIT_AND: fprintf(out, "    and x0, x0, x1\n"); break;
         case NODE_BIT_OR:  fprintf(out, "    orr x0, x0, x1\n"); break;
         case NODE_BIT_XOR: fprintf(out, "    eor x0, x0, x1\n"); break;
