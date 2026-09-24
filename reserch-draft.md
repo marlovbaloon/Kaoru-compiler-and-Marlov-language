@@ -6,17 +6,17 @@
 
 **อีเมล:** marlovbaloon@gmail.com
 
-**รหัสโค้ดต้นฉบับ (Repository):** `[https://github.com/marlovbaloon/Kaoru-compiler-and-Marlov-language](https://github.com/marlovbaloon/Kaoru-compiler-and-Marlov-language)`
+**รหัสโค้ดต้นฉบับ (Repository):** [https://github.com/marlovbaloon/Kaoru-compiler-and-Marlov-language](https://github.com/marlovbaloon/Kaoru-compiler-and-Marlov-language?utm_source=gemini)
 
 ---
 
 ### บทคัดย่อ
 
-การวิเคราะห์ความลึกสแต็กสูงสุดในกรณีเลวร้ายที่สุด ($\mathrm{Stack}_{\mathrm{Peak}}$) สำหรับภาษาเอนกประสงค์บนระบบฝังตัวแบบ Bare-metal ถือเป็นปัญหาที่ตัดสินไม่ได้ทางคณิตศาสตร์ (Undecidable / Rice's Theorem) เนื่องจากการคงอยู่ของโครงสร้าง Recursion และ Dynamic Dispatching การบีบบังคับใช้คอมไพเลอร์เอนกประสงค์อย่าง GCC หรือ LLVM ในระบบ Safety-Critical จึงต้องพึ่งพาการอนุมาน Control Flow Graph (CFG) ในส่วน Back-end ซึ่งแปรผันตามระดับ Optimization และเสี่ยงต่อการเกิด Structural Drift
+การวิเคราะห์ความลึกสแต็กสูงสุดในกรณีเลวร้ายที่สุด ($\mathrm{Stack}_{\mathrm{Peak}}$) สำหรับภาษาเอนกประสงค์บนระบบฝังตัวแบบ Bare-metal ถือเป็นปัญหาที่ตัดสินไม่ได้ทางคณิตศาสตร์ (Undecidable Problem ตามทฤษฎีบทของ Rice) เนื่องจากโครงสร้างการเรียกย้อนกลับ (Recursion) และการจัดส่งฟังก์ชันแบบพลวัต (Dynamic Dispatching) การนำคอมไพเลอร์เอนกประสงค์ เช่น GCC หรือ LLVM มาใช้ในระบบที่เน้นความปลอดภัยสูง (Safety-Critical Systems) จึงต้องพึ่งพาการอนุมาน Control Flow Graph (CFG) ในส่วน Back-end ซึ่งแปรผันตามระดับ Optimization และเสี่ยงต่อการเกิด Structural Drift
 
-บทความนี้นำเสนอ **Marlov Language** ภาษาเฉพาะทางที่มีสถาปัตยกรรมไร้การเรียกย้อนกลับ (Non-Recursive Architecture) โดยจำกัดกราฟการไหลของโปรแกรมให้อยู่ในรูป Directed Acyclic Graph (DAG) สมบูรณ์ ร่วมกับ **Kaoru Compiler** ที่นำเสนอกระบวนทัศน์การคืนพื้นที่สแต็กเชิงประจักษ์โดยขับเคลื่อนด้วยต้นไม้ไวยากรณ์นามธรรม (AST-Driven Stack Reclamation) ในส่วน Front-end โดยตรง การย้ายเจตนาการจัดการหน่วยความจำมาไว้ที่จุดสะกิดขอบเขต AST (Shift-Left Memory Intent) ช่วยข้ามความซับซ้อนของการวิเคราะห์ Liveness ใน Back-end และแปลงโครงสร้างไวยากรณ์ไปเป็นคำสั่ง ARM Thumb-2 (`ADD SP, SP, #N`) ที่รักษากฎการจัดเรียง 8 ไบต์ตามมาตรฐาน ARM AAPCS อย่างเป็นเส้นตรง $1:1$
+บทความนี้นำเสนอ **Marlov Language** ภาษาเฉพาะทางที่มีสถาปัตยกรรมไร้การเรียกย้อนกลับ (Non-Recursive Architecture) โดยจำกัดกราฟการเรียกฟังก์ชัน (Call Graph) ให้อยู่ในรูป Directed Acyclic Graph (DAG) สมบูรณ์ ร่วมกับ **Kaoru Compiler** ที่นำเสนอกระบวนทัศน์การคืนพื้นที่สแต็กเชิงประจักษ์โดยขับเคลื่อนด้วยต้นไม้ไวยากรณ์นามธรรม (AST-Driven Stack Reclamation) ในส่วน Front-end โดยตรง การย้ายเจตนาการจัดการหน่วยความจำมาไว้ที่จุดสะกิดขอบเขต AST (Shift-Left Memory Intent) ช่วยข้ามความซับซ้อนของการวิเคราะห์ Liveness ใน Back-end และแปลงโครงสร้างไวยากรณ์ไปเป็นคำสั่ง ARM Thumb-2 (`ADD SP, SP, #N`) ที่รักษากฎการจัดเรียง 8 ไบต์ตามมาตรฐาน ARM AAPCS อย่างเป็นเส้นตรง $1:1$
 
-งานวิจัยนี้พิสูจน์คุณสมบัติคงตัวของสแต็ก ($sp_{\text{exit}} = sp_0$) และขอบเขตการจัดเรียงฮาร์ดแวร์ ($sp \equiv 0 \pmod 8$) ผ่านสมานตศาสตร์เชิงปฏิบัติการโครงสร้าง (Structural Operational Semantics) และตรวจสอบความถูกต้องเชิงประจักษ์บนระบบจำลอง QEMU ผลการทดลองยืนยันว่าการรวมกันของภาษา Marlov และ Kaoru Compiler สามารถแปลงปัญหาการหาค่า $\mathrm{Stack}_{\mathrm{Peak}}$ ทั้งระบบให้กลายเป็นปัญหาที่คำนวณได้แบบ Deterministic ในเวลา $O(N)$ พร้อมทั้งกำจัด Runtime Cleanup Overhead ได้ 100%
+งานวิจัยนี้พิสูจน์คุณสมบัติคงตัวของสแต็ก ($sp_{\text{exit}} = sp_0$) และขอบเขตการจัดเรียงฮาร์ดแวร์ ($sp \equiv 0 \pmod 8$) ผ่านสมานตศาสตร์เชิงปฏิบัติการโครงสร้าง (Structural Operational Semantics) และประเมินผลเชิงประจักษ์เพื่อยืนยันว่าการรวมกันของภาษา Marlov และ Kaoru Compiler สามารถแปลงปัญหาการหาค่า $\mathrm{Stack}_{\mathrm{Peak}}$ ทั้งระบบให้กลายเป็นปัญหาที่คำนวณได้แบบ Deterministic ในเวลา $\mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{})$ พร้อมทั้งกำจัด Runtime Cleanup Overhead ได้อย่างสมบูรณ์
 
 **คำสำคัญ:** ภาษา Marlov, Kaoru Compiler, ต้นไม้ไวยากรณ์นามธรรม, การคืนพื้นที่สแต็ก, ความเป็นระบบกำหนด, สถาปัตยกรรมไร้ Recursion, ARM Cortex-M, Bare-Metal
 
@@ -29,8 +29,8 @@
 อย่างไรก็ตาม ในทางทฤษฎีวิทยาการคอมพิวเตอร์ การวิเคราะห์ความลึกสแต็กกรณีเลวร้ายที่สุด ($\mathrm{Stack}_{\mathrm{Peak}}$) บนภาษาเอนกประสงค์ (General-Purpose Languages) ต้องชนกับ **"กำแพงทฤษฎีการคำนวณ"**:
 
 1. **Halting Problem & Rice's Theorem:** การทำนาย Execution Path ทุกสายอย่างสมบูรณ์โดยไม่มี False Positive ในภาษาที่เป็น Turing-complete นั้นเป็นไปไม่ได้ทางคณิตศาสตร์
-2. **Unbounded Recursion:** หากภาษาอนุญาตให้มี Recursion ขอบเขตสแต็กสูงสุดจะมีค่าเป็น $O(\infty)$ ในขั้นตอนการคอมไพล์
-3. **Back-end Non-determinism:** คอมไพเลอร์อย่าง GCC/LLVM ใช้การประเมิน Liveness และ Register Allocation บน Control Flow Graph (CFG) ในส่วน Back-end ซึ่งทำให้ Layout ของ Stack Frame เปลี่ยนแปลงไปตามOptimization Flags (`-O0` ถึง `-O3`) ส่งผลให้การพิสูจน์ความถูกต้องรูปนัย (Formal Verification) กระทำได้ยาก
+2. **Unbounded Recursion:** หากภาษาอนุญาตให้มี Recursion ขอบเขตสแต็กสูงสุดจะมีค่าเป็น $\mathcal{O}(\infty)$ ในขั้นตอนการคอมไพล์
+3. **Back-end Non-determinism:** คอมไพเลอร์อย่าง GCC/LLVM ใช้การประเมิน Liveness และ Register Allocation บน Control Flow Graph (CFG) ในส่วน Back-end ซึ่งทำให้ Layout ของ Stack Frame เปลี่ยนแปลงไปตาม Optimization Flags (`-O0` ถึง `-O3`) ส่งผลให้การพิสูจน์ความถูกต้องรูปนัย (Formal Verification) กระทำได้ยาก
 
 เพื่อแก้ปัญหาที่ระดับรากฐาน งานวิจัยนี้นำเสนอ **Marlov Language** ร่วมกับ **Kaoru Compiler** โดย Marlov ถูกออกแบบมาเป็นภาษาเฉพาะทาง (Domain-Specific Language) ที่ปฏิเสธโครงสร้าง Recursion และ Dynamic Dispatching โดยสิ้นเชิง ส่งผลให้ Call Graph ของโปรแกรมถูกจำกัดให้เป็น **Directed Acyclic Graph (DAG)** ทางคณิตศาสตร์อย่างเด็ดขาด
 
@@ -41,7 +41,7 @@
 1. **Marlov Language Architecture:** นิยามไวยากรณ์ภาษาเฉพาะทางแบบ Non-Recursive เพื่อบีบ Call Graph ให้อยู่ในรูป DAG ซึ่งข้ามข้อจำกัดของ Halting Problem ในการคำนวณ $\mathrm{Stack}_{\mathrm{Peak}}$
 2. **Formal AST Reclamation Semantics:** รูปนัยของกลไกการคืนพื้นที่สแต็กที่ขับเคลื่อนด้วย AST สำหรับ ARM Cortex-M ผ่าน Structural Operational Semantics และการบังคับใช้กฎ AAPCS 8-byte Alignment
 3. **Mathematical Proofs of Invariants:** การพิสูจน์ทางคณิตศาสตร์ของคุณสมบัติคงตัวในการอนุรักษ์สแต็ก ($sp_{\text{exit}} = sp_0$) และความคงตัวของการจัดเรียง ($sp \equiv 0 \pmod 8$)
-4. **Open-Source Artifact:** การเปิดเผยชุดโค้ดต้นฉบับของ Kaoru Compiler และภาษา Marlov เพื่อการทดสอบซ้ำบน QEMU ARM Target
+4. **Open-Source Artifact:** การเปิดเผยชุดโค้ดต้นฉบับของ Kaoru Compiler และภาษา Marlov เพื่อการทดสอบซ้ำบน x64 และ ARM Target
 
 ---
 
@@ -49,7 +49,7 @@
 
 #### 2.1 ข้อจำกัดของภาษาเอนกประสงค์ในงาน Safety-Critical
 
-มาตรฐานความปลอดภัยอย่าง ISO 26262 และ DO-178C บังคับให้ต้องระบุขอบเขตการใช้หน่วยความจำอย่างชัดเจน ใน C/C++ นักพัฒนาต้องใช้อุปกรณ์ภายนอก (เช่น AbsInt StackAnalyzer) สแกนไฟล์ไบนารีเพื่อหา WCET และ Stack Depth แต่กระบวนการนี้ล้มเหลวทันทีเมื่อเจอ Function Pointers หรือ Recursion นอกจากนี้ C++ RAII ยังแทรก Landing pads และ Exception Unwinding Tables ซึ่งสร้าง Runtime Overhead ที่ไม่เป็นเส้นตรง
+มาตรฐานความปลอดภัยอย่าง ISO 26262 และ DO-178C บังคับให้ต้องระบุขอบเขตการใช้หน่วยความจำอย่างชัดเจน ใน C/C++ นักพัฒนาต้องใช้อุปกรณ์ภายนอก (เช่น AbsInt StackAnalyzer) สแกนไฟล์ไบนารีเพื่อหา Worst-Case Execution Time (WCET) และ Stack Depth แต่กระบวนการนี้ล้มเหลวทันทีเมื่อเจอ Function Pointers หรือ Recursion นอกจากนี้ C++ RAII ยังแทรก Landing pads และ Exception Unwinding Tables ซึ่งสร้าง Runtime Overhead ที่ไม่เป็นเส้นตรง
 
 #### 2.2 วงจรชีวิตในภาษา Rust (Borrow Checker)
 
@@ -63,7 +63,7 @@
 | **Call Graph Structure** | Cyclic / Dynamic | Cyclic / Dynamic | **Strict DAG (Directed Acyclic Graph)** |
 | **Reclamation Trigger** | Back-end Liveness on CFG | MIR Drop Flags + LLVM | **Front-end AST Scope Trigger** |
 | **Stack Layout Predictability** | Variable (Depends on `-O` flags) | Variable (LLVM Backend) | **100% Deterministic ($1:1$ Static)** |
-| **$\mathrm{Stack}_{\mathrm{Peak}}$ Computation** | Undecidable ($O(\infty)$ with Recursion) | Undecidable | **Compile-time Decidable ($O(N)$ AST)** |
+| **$\mathrm{Stack}_{\mathrm{Peak}}$ Computation** | Undecidable ($\mathcal{O}(\infty)$ with Recursion) | Undecidable | **Compile-time Decidable ($\mathcal{O}(\Vert{}V\Vert{} + \Vert{}E\Vert{})$)** |
 
 ---
 
@@ -110,23 +110,30 @@
 
 ### 4. สมานตศาสตร์รูปนัยและการพิสูจน์คุณสมบัติคงตัว (Formal Semantics & Invariants)
 
-$$\mathbf{1.\ Small\text{-}Step\ Operational\ Semantics\ State\ Tuple}$$
+#### 4.1 นิยามสมานตศาสตร์และกฎการเปลี่ยนสถานะ
+
+1. **Small-Step Operational Semantics State Tuple:**
 
 $$\mathcal{S} \in \text{AST State}, \quad \sigma \in \text{Memory Store}, \quad sp \in \mathbb{N} \pmod 8$$
 
+
+
 $$\langle \mathcal{S}, \sigma, sp \rangle \longrightarrow \langle \mathcal{S}', \sigma', sp' \rangle$$
 
-$$\mathbf{2.\ Hardware\ 8\text{-}Byte\ Alignment\ Operator}$$
+2. **Hardware 8-Byte Alignment Operator:**
 
 $$\mathrm{Align8}(x) \triangleq (x + 7) \land \neg 7$$
 
+
+
 $$\forall x \in \mathbb{N}, \quad \mathrm{Align8}(x) \equiv 0 \pmod 8$$
 
-$$\mathbf{3.\ Frame\ Allocation\ Metric\ Function}$$
+3. **Frame Allocation Metric Function:**
 
 $$\mathrm{SizeOfScope}(B) \triangleq \mathrm{Align8}\left( \sum_{v \in \mathrm{Vars}(B)} \mathrm{sizeof}(v) \right)$$
 
-$$\mathbf{4.\ Transition\ Inference\ Rules\ for\ Scope\ Block\ } B$$
+
+4. **Transition Inference Rules for Scope Block $B$:**
 
 $$\text{[E-ENTER]} \quad \frac{N = \mathrm{SizeOfScope}(B)}{\langle \mathrm{Enter}(B), \sigma, sp_0 \rangle \longrightarrow \langle \mathrm{Body}(B), \sigma, sp_0 - N \rangle}$$
 
@@ -134,63 +141,70 @@ $$\text{[E-EXEC]} \quad \frac{\langle \mathrm{Body}(B), \sigma, sp_0 - N \rangle
 
 $$\text{[E-EXIT]} \quad \frac{N = \mathrm{SizeOfScope}(B)}{\langle \mathrm{Exit}(B), \sigma', sp_0 - N \rangle \longrightarrow \langle \text{skip}, \sigma', (sp_0 - N) + N \rangle}$$
 
-$$\mathbf{5.\ Theorem\ 1:\ Local\ Scope\ Stack\ Preservation\ Invariant}$$
+5. **Theorem 1 (Local Scope Stack Preservation Invariant):**
 
 $$\forall B \in \text{AST}, \quad \langle B, \sigma, sp_0 \rangle \longrightarrow^* \langle \text{skip}, \sigma', sp_{\text{exit}} \rangle \implies sp_{\text{exit}} = sp_0$$
 
-$$\mathbf{Proof\ Step:} \quad sp_{\text{exit}} = (sp_0 - N) + N = sp_0 \quad \blacksquare$$
 
-$$\mathbf{6.\ Theorem\ 2:\ Bounded\ Global\ Stack\ Depth\ Decidability}$$
+6. **Theorem 2 (Bounded Global Stack Depth Decidability):**
 
 $$\text{Given Marlov Call Graph } G = (V, E) \text{ is a DAG}, \quad \mathrm{Stack}_{\mathrm{Peak}} = \max_{p \in \text{Paths}(G)} \left( \sum_{f \in p} \mathrm{FrameSize}(f) \right)$$
 
-$$\mathrm{Complexity:} \quad \mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{}) \quad \text{(Decidable at Compile-time)} \quad \blacksquare$$
 
-$$\mathbf{7.\ Lemma\ 1:\ Hardware\ Alignment\ Preservation}$$
 
-$$\forall sp_0 \equiv 0 \pmod 8, \quad \forall B \in \text{AST}: \quad sp_{\text{mid}} = sp_0 - \mathrm{SizeOfScope}(B) \implies sp_{\text{mid}} \equiv 0 \pmod 8 \quad \blacksquare$$
+$$\text{Complexity:} \quad \mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{}) \quad \text{(Decidable at Compile-time)}$$
+
+7. **Lemma 1 (Hardware Alignment Preservation):**
+
+$$\forall sp_0 \equiv 0 \pmod 8, \quad \forall B \in \text{AST}: \quad sp_{\text{mid}} = sp_0 - \mathrm{SizeOfScope}(B) \implies sp_{\text{mid}} \equiv 0 \pmod 8$$
+
+
 
 ---
 
-#### 4.1 บทพิสูจน์ทางคณิตศาสตร์ (Mathematical Proofs)
+#### 4.2 บทพิสูจน์ทางคณิตศาสตร์ (Mathematical Proofs)
 
-1. **การพิสูจน์ Alignment Operator (สมการที่ 2):**
-นิยาม $\neg 7$ ในระบบการแทนค่าบิต Complement คือบิตที่มี 3 บิตต่ำสุดเป็น `000` การนำ $(x + 7)$ ทำ Bitwise AND กับ $\neg 7$ จะล้างบิต 3 บิตต่ำสุดให้เป็น 0 เสมอ ซึ่งจำนวนเต็มใดๆ ที่มี 3 บิตต่ำสุดเป็น 0 ย่อมหารด้วย $2^3 = 8$ ลงตัว ($\equiv 0 \pmod 8$)
-2. **การพิสูจน์ Theorem 1 (Local Stack Preservation):**
+1. **การพิสูจน์ Alignment Operator:**
+นิยาม $\neg 7$ ในระบบการแทนค่าบิต Two's Complement คือบิตที่มี 3 บิตต่ำสุดเป็น `000` การนำ $(x + 7)$ ทำ Bitwise AND กับ $\neg 7$ จะล้างบิต 3 บิตต่ำสุดให้เป็น 0 เสมอ ซึ่งจำนวนเต็มใดๆ ที่มี 3 บิตต่ำสุดเป็น 0 ย่อมหารด้วย $2^3 = 8$ ลงตัว ($\equiv 0 \pmod 8$) $\blacksquare$
+2. **การพิสูจน์ Theorem 1 (Local Scope Stack Preservation Invariant):**
 จากการประยุกต์ใช้กฎ `[E-ENTER]`, `[E-EXEC]`, และ `[E-EXIT]` ตามลำดับ:
-$sp_0 \xrightarrow{\text{ENTER}} sp_1 = sp_0 - N \xrightarrow{\text{EXEC}} sp_2 = sp_0 - N \xrightarrow{\text{EXIT}} sp_{\text{exit}} = sp_2 + N$
+
+$$sp_0 \xrightarrow{\text{ENTER}} sp_1 = sp_0 - N \xrightarrow{\text{EXEC}} sp_2 = sp_0 - N \xrightarrow{\text{EXIT}} sp_{\text{exit}} = sp_2 + N$$
+
+
+
 ดังนั้น $sp_{\text{exit}} = (sp_0 - N) + N = sp_0$ ค่าตัวชี้สแต็กหลังออกจากขอบเขตจึงเท่ากับค่าเริ่มต้นเสมอ โดยไม่มี Unwinding Drift $\blacksquare$
-3. **การพิสูจน์ Theorem 2 (Global Stack Depth Decidability):**
+3. **การพิสูจน์ Theorem 2 (Bounded Global Stack Depth Decidability):**
 เนื่องจากภาษา Marlov บังคับให้ Call Graph $G = (V, E)$ เป็น Directed Acyclic Graph (DAG) ตาม Axiom 1 และ 2 ลำดับการเรียกฟังก์ชันจึงสามารถเรียงลำดับแบบ Topological Sort ได้ ปัญหาการหาเส้นทางที่มีผลรวมขนาดเฟรมสแต็กสูงสุดจึงลดรูปเหลือเพียงการหา Longest Path บน DAG ซึ่งมีคำตอบที่แน่นอนและประมวลผลได้ในเวลา $\mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{})$ ในขั้นตอนคอมไพล์ $\blacksquare$
 4. **การพิสูจน์ Lemma 1 (Hardware Alignment Preservation):**
-กำหนดให้ $sp_0 = 8k$ ($k \in \mathbb{N}$) และจากสมการที่ 3 ได้ว่า $N = \mathrm{SizeOfScope}(B) = 8m$ ($m \in \mathbb{N}$)
+กำหนดให้ $sp_0 = 8k$ ($k \in \mathbb{N}$) และจากคุณสมบัติของ Alignment Operator ได้ว่า $N = \mathrm{SizeOfScope}(B) = 8m$ ($m \in \mathbb{N}$)
 ดังนั้น $sp_{\text{mid}} = 8k - 8m = 8(k - m)$ ซึ่งหารด้วย 8 ลงตัวเสมอ ไม่เกิด `UsageFault: Unaligned Access` บน ARM Hardware $\blacksquare$
 
 ---
 
-## 5. การตรวจสอบความถูกต้องและผลเชิงประจักษ์ (Verification & Validation)
+### 5. การตรวจสอบความถูกต้องและผลเชิงประจักษ์ (Verification & Validation)
 
-การประเมินผลดำเนินการภายใต้ปรัชญา **Empirical Invariant Validation** โดยมุ่งเน้นการยืนยันคุณสมบัติคงตัวทางคณิตศาสตร์ (Mathematical Invariants) มากกว่าการวัดความเร็วในการประมวลผล การทดสอบในเฟสปัจจุบันดำเนินการบนสถาปัตยกรรม x64 (Linux/x86_64 Host) เพื่อตรวจสอบความถูกต้องของ Front-end Pipeline, AST Scope Reclamation, และกลไกการคำนวณ StackPeak ในระดับ IR ร่วมกับการประเมินผลเชิงจำลองสำหรับเป้าหมาย ARM Cortex-M
+การประเมินผลดำเนินการภายใต้ปรัชญา **Empirical Invariant Validation** โดยมุ่งเน้นการยืนยันคุณสมบัติคงตัวทางคณิตศาสตร์ (Mathematical Invariants) มากกว่าการวัดความเร็วในการประมวลผล การทดสอบในเฟสปัจจุบันดำเนินการบนสถาปัตยกรรม x64 (Linux/x86_64 Host) เพื่อตรวจสอบความถูกต้องของ Front-end Pipeline, AST Scope Reclamation, และกลไกการคำนวณ $\mathrm{Stack}_{\mathrm{Peak}}$ ในระดับ IR ร่วมกับการประเมินผลเชิงจำลองสำหรับเป้าหมาย ARM Cortex-M
 
 | Test Metric | GCC Target Class | Kaoru (Marlov Language) |
-| :--- | :--- | :--- |
-| **Call Graph Structure** | Cyclic / Dynamic | Strict DAG (Axiomatic) |
-| **Global Stack Depth Bounds** | Undecidable | 100% Compile-time Decidable |
-| **Stack Frame Alignment** | System V AMD64 ABI | Guaranteed 8-byte / 16-byte |
-| **Reclamation Overhead Strategy** | Dynamic Liveness | Explicit O(1) AST Insertion |
-| **Unwinding Drift ($sp_{exit}$)** | Risk on Refactor | Zero Drift ($sp_{exit} = sp_0$) |
+| --- | --- | --- |
+| **Call Graph Structure** | Cyclic / Dynamic | **Strict DAG (Axiomatic)** |
+| **Global Stack Depth Bounds** | Undecidable | **100% Compile-time Decidable** |
+| **Stack Frame Alignment** | System V AMD64 ABI | **Guaranteed 8-byte / 16-byte** |
+| **Reclamation Overhead Strategy** | Dynamic Liveness | **Explicit $\mathcal{O}(1)$ AST Insertion** |
+| **Unwinding Drift ($sp_{\text{exit}}$)** | Risk on Refactor | **Zero Drift ($sp_{\text{exit}} = sp_0$)** |
 
-### ผลการทดสอบเชิงประจักษ์
+#### ผลการทดสอบเชิงประจักษ์
 
 ผลการทดสอบเชิงประจักษ์และการตรวจสอบโค้ดภาษาเครื่องที่เจนจาก Kaoru Compiler บนระบบ x64 ชี้ให้เห็นว่า:
 
-* **Zero Unwinding Drift ($sp_{exit} = sp_0$):** ทุกขอบเขตการทำงานของภาษา Marlov (รวมถึงขอบเขตที่มี Nested Control Flows และ Early Returns) สามารถสร้างคำสั่งปรับตำแหน่ง Stack Pointer คืนกลับสู่ค่าเดิมได้อย่างถูกต้อง 100% ตรงตาม Theorem 1
-* **Compile-time Deterministic Footprint:** การบังคับใช้สัจพจน์ Non-Recursive (DAG Call Graph) ช่วยให้ Kaoru Compiler สามารถวิเคราะห์และพิมพ์รายงานความลึกสแต็กสูงสุด (StackPeak) ของทั้งโปรแกรมได้ล่วงหน้าในขั้นตอนคอมไพล์ด้วยเวลา $O(N)$
+* **Zero Unwinding Drift ($sp_{\text{exit}} = sp_0$):** ทุกขอบเขตการทำงานของภาษา Marlov (รวมถึงขอบเขตที่มี Nested Control Flows และ Early Returns) สามารถสร้างคำสั่งปรับตำแหน่ง Stack Pointer คืนกลับสู่ค่าเดิมได้อย่างถูกต้อง 100% ตรงตาม Theorem 1
+* **Compile-time Deterministic Footprint:** การบังคับใช้สัจพจน์ Non-Recursive (DAG Call Graph) ช่วยให้ Kaoru Compiler สามารถวิเคราะห์และพิมพ์รายงานความลึกสแต็กสูงสุด ($\mathrm{Stack}_{\mathrm{Peak}}$) ของทั้งโปรแกรมได้ล่วงหน้าในขั้นตอนคอมไพล์ด้วยเวลา $\mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{})$
 * **AST Scope Reclamation Validity:** การแทรกกลไกคืนพื้นที่สแต็ก ณ จุดสะกิดขอบเขต AST (Front-end) ทำงานได้อย่างสมบูรณ์ โดยไม่พึ่งพาการวิเคราะห์ Control Flow Graph (CFG) ในส่วน Back-end
 
 ---
 
-> **หมายเหตุและแผนการพัฒนา (Implementation Status & Target Roadmap):**  
+> **หมายเหตุและแผนการพัฒนา (Implementation Status & Target Roadmap):**
 > ผลการทดสอบเชิงประจักษ์ในบทความฉบับนี้รันบนสถาปัตยกรรม x64 เป็นหลักเพื่อพิสูจน์ความถูกต้องของ Front-end AST Pipeline และรูปแบบสมานตศาสตร์ (Formal Semantics) ปัจจุบัน Kaoru Compiler อยู่ในระหว่างการขยายส่วน Code Generator (Back-end) เพื่อสร้างคำสั่ง Thumb-2 (`ADD`/`SUB` `SP`) และการบังคับใช้ AAPCS 8-byte Alignment สำหรับสถาปัตยกรรม ARM Cortex-M โดยมีแผนจะดำเนินการทดสอบบนระบบจำลอง QEMU และบอร์ดฮาร์ดแวร์จริงในระยะการวิจัยถัดไป
 
 ---
@@ -199,7 +213,7 @@ $sp_0 \xrightarrow{\text{ENTER}} sp_1 = sp_0 - N \xrightarrow{\text{EXEC}} sp_2 
 
 เพื่อสนับสนุนการตรวจสอบซ้ำได้อย่างอิสระ (Reproducibility) โค้ดต้นฉบับทั้งหมดเปิดเผยไว้ที่:
 
-* **Repository:** `[https://github.com/marlovbaloon/Kaoru-compiler-and-Marlov-language](https://github.com/marlovbaloon/Kaoru-compiler-and-Marlov-language)`
+* **Repository:** [https://github.com/marlovbaloon/Kaoru-compiler-and-Marlov-language](https://github.com/marlovbaloon/Kaoru-compiler-and-Marlov-language?utm_source=gemini)
 * **Artifact Components:**
 1. ตัวคอมไพเลอร์ Kaoru และไวยากรณ์ภาษา Marlov (พัฒนาโดยไม่พึ่งพาไลบรารีภายนอก)
 2. ชุดทดสอบสมานตศาสตร์และ Edge Cases การคืนพื้นที่สแต็ก
@@ -211,7 +225,7 @@ $sp_0 \xrightarrow{\text{ENTER}} sp_1 = sp_0 - N \xrightarrow{\text{EXEC}} sp_2 
 
 ### 7. สรุป (Conclusion)
 
-งานวิจัยนี้นำเสนอการแก้ปัญหาขอบเขตสแต็กในระบบฝังตัวโดยการ **"ชนกำแพงทฤษฎีการคำนวณและสร้างขอบเขตใหม่"** การกำหนดให้ภาษา Marlov เป็นภาษาเฉพาะทางแบบ Non-Recursive (DAG Call Graph) ช่วยข้ามข้อจำกัดทางคณิตศาสตร์เรื่อง Halting Problem ส่งผลให้ Kaoru Compiler สามารถย้ายเจตนาการจัดการสแต็กมาไว้ที่จุดสะกิดขอบเขต AST ในส่วน Front-end ได้อย่างสมบูรณ์ กลไกนี้ได้รับการพิสูจน์แล้วว่ารักษากฎการจัดเรียง 8 ไบต์ การันตีคุณสมบัติ $sp_{\text{exit}} = sp_0$ และทำให้การคำนวณ $\mathrm{Stack}_{\mathrm{Peak}}$ ของทั้งระบบกลายเป็นเรื่องที่ตัดสินได้แบบ Deterministic $100\%$ ในขั้นตอนคอมไพล์
+งานวิจัยนี้นำเสนอการแก้ปัญหาขอบเขตสแต็กในระบบฝังตัวโดยการ **"ชนกำแพงทฤษฎีการคำนวณและสร้างขอบเขตใหม่"** การกำหนดให้ภาษา Marlov เป็นภาษาเฉพาะทางแบบ Non-Recursive (DAG Call Graph) ช่วยข้ามข้อจำกัดทางคณิตศาสตร์เรื่อง Halting Problem ส่งผลให้ Kaoru Compiler สามารถย้ายเจตนาการจัดการสแต็กมาไว้ที่จุดสะกิดขอบเขต AST ในส่วน Front-end ได้อย่างสมบูรณ์ กลไกนี้ได้รับการพิสูจน์แล้วว่ารักษากฎการจัดเรียง 8 ไบต์ การันตีคุณสมบัติ $sp_{\text{exit}} = sp_0$ และทำให้การคำนวณ $\mathrm{Stack}_{\mathrm{Peak}}$ ของทั้งระบบกลายเป็นเรื่องที่ตัดสินได้แบบ Deterministic 100% ในขั้นตอนคอมไพล์
 
 ---
 
