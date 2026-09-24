@@ -1,12 +1,8 @@
-//mstack.c
+//mstack.c 
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 #include "mtypes.h"
-
-typedef struct {
-    char name[32];
-    int32_t stack_offset; /* offset distance form Stack RAM */
-} Symbol;
 
 typedef struct {
     Symbol symbols[64];

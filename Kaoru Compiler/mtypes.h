@@ -17,7 +17,7 @@ typedef enum {
     TOKEN_AT_INT, TOKEN_AT_STR, TOKEN_AT_BOOL, TOKEN_AT_TBL,
     TOKEN_AT_PRINT, TOKEN_AT_DEBUG, TOKEN_IDENTIFIER, TOKEN_NUMBER,
     TOKEN_STRING_LIT, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_LPAREN,
-    TOKEN_RPAREN, TOKEN_LBRACKET,TOKEN_LBRACKET ,TOKEN_SEMICOLON, TOKEN_ASSIGN, /* '=' */
+    TOKEN_RPAREN, TOKEN_SEMICOLON, TOKEN_ASSIGN, /* '=' */
     TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH,
     TOKEN_AND, TOKEN_OR, TOKEN_NOT, TOKEN_IF, TOKEN_ELSE, TOKEN_WHILE, TOKEN_RETURN, TOKEN_FOR, TOKEN_COMMA, TOKEN_COLON,
     TOKEN_EQ,       /* == */
@@ -36,6 +36,8 @@ typedef enum {
     TOKEN_CARET,    /* '^' Bitwise XOR */
     TOKEN_LSHIFT,   /* '<<' Bitwise Shift Left */
     TOKEN_RSHIFT,   /* '>>' Bitwise Shift Right */
+    TOKEN_SHL,      /* Alias / Token for Shift Left (<<) */
+    TOKEN_SHR,      /* Alias / Token for Shift Right (>>) */
     TOKEN_ARROW,    /* '->' Member Access Pointer */
     TOKEN_DOT,      /* '.' Member Access Direct */
     TOKEN_LBRACKET, /* '[' Array/Pointer Index */
@@ -43,6 +45,9 @@ typedef enum {
     TOKEN_AT_CHAR,  /* '@char' 8-bit Byte Type */
     TOKEN_AT_PTR    /* '@ptr' Generic Pointer Type */
 } MTokenType;
+
+/* Alias MTokenType to TokenType for compatibility across codebase */
+typedef MTokenType TokenType;
 
 typedef enum { 
     NODE_INT, NODE_ADD, NODE_VAR_DECL, 
@@ -69,6 +74,9 @@ typedef enum {
     NODE_CHAR,       /* 8-bit Byte Literal */
     NODE_DEREF,      /* Dereference (*ptr or ptr[index]) */
     NODE_ADDR_OF,    /* Address-of (&var) */
+    NODE_INDEX,      /* Array/Pointer Index Node (ptr[idx]) */
+    NODE_LOAD_BYTE,  /* Bare-metal Load 1 Byte */
+    NODE_STORE_BYTE, /* Bare-metal Store 1 Byte */
     NODE_MEMBER_REF, /* Struct Field Access (ptr->field or struct.field) */
     NODE_ASSIGN_PTR, /* Store via Pointer (*ptr = val) */
     NODE_BIT_AND,    /* Bitwise AND (&) */
@@ -156,7 +164,6 @@ typedef enum {
     SYM_VARIABLE,
     SYM_STRUCT
 } SymbolKind;
-
 typedef struct Symbol {
     char name[64];
     SymbolKind kind;
@@ -166,6 +173,7 @@ typedef struct Symbol {
     size_t data_size;  /* Data size: 1 byte (char), 8 bytes (int/ptr) */
     struct Symbol *next;
 } Symbol;
+
 
 typedef struct {
     Symbol *head;

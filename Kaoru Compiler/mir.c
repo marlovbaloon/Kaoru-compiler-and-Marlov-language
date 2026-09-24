@@ -6,6 +6,14 @@
 #include "mir.h"
 #include "mtypes.h"
 
+/* Forward declaration for ScopeContext structure */
+typedef struct ScopeContext ScopeContext;
+struct ScopeContext {
+    char break_label[32];
+    char continue_label[32];
+    ScopeContext *parent;
+};
+
 /* Formula 2: Hardware 8-Byte Alignment Operator */
 size_t align8(size_t x) {
     return (x + 7) & ~((size_t)7);
@@ -187,7 +195,7 @@ void lower_ast_node(ASTNode *node, IRProgram *prog, ScopeContext *ctx, int32_t *
             IRInstruction *bin = create_ir_inst(op);
             strncpy(bin->target, out_target, sizeof(bin->target) - 1);
             strncpy(bin->arg1, left_target, sizeof(bin->arg1) - 1);
-            strncpy(bin->arg2, right_target, sizeof(right_target) - 1);
+            strncpy(bin->arg2, right_target, sizeof(bin->arg2) - 1);
             append_inst(prog, bin);
         }
         break;
@@ -289,8 +297,8 @@ void lower_ast_node(ASTNode *node, IRProgram *prog, ScopeContext *ctx, int32_t *
         }
 
         ScopeContext loop_ctx;
-        strncpy(loop_ctx.break_label, label_end, sizeof(loop_ctx.break_label) - 1);
-        strncpy(loop_ctx.continue_label, label_start, sizeof(loop_ctx.continue_label) - 1);
+        strncpy(loop_ctx.break_label, label_end, sizeof(label_end));
+        strncpy(loop_ctx.continue_label, label_start, sizeof(loop_ctx.continue_label));
         loop_ctx.parent = ctx;
 
         if (node->for_body) {

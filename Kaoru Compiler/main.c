@@ -20,10 +20,10 @@ static void print_usage(const char *prog_name) {
 /* Helper function to free Symbol Table memory */
 static void cleanup_symbol_table(SymbolTable *symtab) {
     if (!symtab) return;
-    SymbolNode *curr = symtab->head;
+    Symbol *curr = symtab->head;
     while (curr) {
-        SymbolNode *next = curr->next;
-        free(curr); // Clean up symbol node allocations
+        Symbol *next = curr->next;
+        free(curr); // Clean up symbol allocations correctly
         curr = next;
     }
     symtab->head = NULL;
