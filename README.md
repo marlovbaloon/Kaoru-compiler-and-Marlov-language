@@ -67,6 +67,11 @@ Bash
 
 # Inspect AST Structure
 ./kaoru source.ml --dump-ast
+
+# test benchmark 
+cd 'Kaoru Compiler'
+cd marlov-benchmark
+make clean && make
 ---
 ## Marlov Language Directives Quick Reference
 @func <name>(<args>) { ... }: Function declaration.

@@ -1,0 +1,2 @@
+*.cls linguist-vendored
+*.tex linguist-detectable=false
