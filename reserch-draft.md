@@ -184,23 +184,15 @@ $$sp_0 \xrightarrow{\text{ENTER}} sp_1 = sp_0 - N \xrightarrow{\text{EXEC}} sp_2
 
 ### 5. การตรวจสอบความถูกต้องและผลเชิงประจักษ์ (Verification & Validation)
 
-การประเมินผลดำเนินการภายใต้ปรัชญา **Empirical Invariant Validation** โดยมุ่งเน้นการยืนยันคุณสมบัติคงตัวทางคณิตศาสตร์ (Mathematical Invariants) มากกว่าการวัดความเร็วในการประมวลผล การทดสอบในเฟสปัจจุบันดำเนินการบนสถาปัตยกรรม x64 (Linux/x86_64 Host) เพื่อตรวจสอบความถูกต้องของ Front-end Pipeline, AST Scope Reclamation, และกลไกการคำนวณ $\mathrm{Stack}_{\mathrm{Peak}}$ ในระดับ IR ร่วมกับการประเมินผลเชิงจำลองสำหรับเป้าหมาย ARM Cortex-M
+รายงานผลการทดลอง: การคืนพื้นที่สแต็กและความคงตัวของสแต็กพอยต์เตอร์ (Kaoru Compiler)
+วัตถุประสงค์: ตรวจสอบคุณสมบัติคงตัวของการคืนพื้นที่สแต็ก ($sp_{\text{exit}} = sp_0$) และขอบเขตการจัดเรียง 8 ไบต์ ($sp \equiv 0 \pmod 8$) บนสถาปัตยกรรมเป้าหมายผลการทดสอบ: สำเร็จ (PASS)
 
-| Test Metric | GCC Target Class | Kaoru (Marlov Language) |
-| --- | --- | --- |
-| **Call Graph Structure** | Cyclic / Dynamic | **Strict DAG (Axiomatic)** |
-| **Global Stack Depth Bounds** | Undecidable | **100% Compile-time Decidable** |
-| **Stack Frame Alignment** | System V AMD64 ABI | **Guaranteed 8-byte / 16-byte** |
-| **Reclamation Overhead Strategy** | Dynamic Liveness | **Explicit $\mathcal{O}(1)$ AST Insertion** |
-| **Unwinding Drift ($sp_{\text{exit}}$)** | Risk on Refactor | **Zero Drift ($sp_{\text{exit}} = sp_0$)** |
+1. Stack Preservation Invariant ($sp_{\text{exit}} = sp_0$):คำสั่ง Epilogue ใช้ mov rsp, rbp คืนตำแหน่งสแต็กพอยต์เตอร์กลับสู่ Base Pointer ก่อนทำ pop rbp และ ret ส่งผลให้ค่า Unwinding Drift เท่ากับ 0 bytes การันตีสแต็กไม่รั่วไหลเมื่อออกจากฟังก์ชัน
+2. Hardware 8-Byte Alignment ($sp \equiv 0 \pmod 8$):การจองพื้นที่ Stack Frame ขนาด 32 ไบต์ (sub rsp, 32) หารด้วย 8 ลงตัวพอดี สอดคล้องตามข้อกำหนด ARM AAPCS และ System V ABI ไม่พบข้อผิดพลาด Unaligned Access
 
-#### ผลการทดสอบเชิงประจักษ์
-
-ผลการทดสอบเชิงประจักษ์และการตรวจสอบโค้ดภาษาเครื่องที่เจนจาก Kaoru Compiler บนระบบ x64 ชี้ให้เห็นว่า:
-
-* **Zero Unwinding Drift ($sp_{\text{exit}} = sp_0$):** ทุกขอบเขตการทำงานของภาษา Marlov (รวมถึงขอบเขตที่มี Nested Control Flows และ Early Returns) สามารถสร้างคำสั่งปรับตำแหน่ง Stack Pointer คืนกลับสู่ค่าเดิมได้อย่างถูกต้อง 100% ตรงตาม Theorem 1
-* **Compile-time Deterministic Footprint:** การบังคับใช้สัจพจน์ Non-Recursive (DAG Call Graph) ช่วยให้ Kaoru Compiler สามารถวิเคราะห์และพิมพ์รายงานความลึกสแต็กสูงสุด ($\mathrm{Stack}_{\mathrm{Peak}}$) ของทั้งโปรแกรมได้ล่วงหน้าในขั้นตอนคอมไพล์ด้วยเวลา $\mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{})$
-* **AST Scope Reclamation Validity:** การแทรกกลไกคืนพื้นที่สแต็ก ณ จุดสะกิดขอบเขต AST (Front-end) ทำงานได้อย่างสมบูรณ์ โดยไม่พึ่งพาการวิเคราะห์ Control Flow Graph (CFG) ในส่วน Back-end
+   สรุปประเด็นปรับปรุง (Technical Note for Next Iteration):
+   Local Offset Binding: พบ Offset ทับซ้อนที่ [rbp - 8] ในส่วน Code Generator (mcodegen) ต้องเชื่อมค่า Offset จาก IR เข้ากับ Symbol Table เพื่อให้ตัวแปรท้องถิ่นแยกสล็อตกันสมบูรณ์
+   Scope Exit Reclamation: Marker # --- Scope Block EXIT --- ยังไม่มีการยิงคำสั่ง add rsp, N ย่อย (ปัจจุบันพึ่งพาการล้างรวบยอดด้วย mov rsp, rbp ใน Epilogue)
 
 ---
 
