@@ -47,8 +47,13 @@ static const char *ARG_REGS[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
 static const char *ARG_REGS[] = {"x0", "x1", "x2", "x3", "x4", "x5"};
 #endif
 
+/* Helper to get safe stack offset (min 8 bytes alignment) */
+static inline int get_safe_offset(int offset) {
+    return (offset <= 0) ? 8 : offset;
+}
+
 /* =========================================================================
- * Runtime Helpers (C-Level Abstraction)
+ * Runtime Helpers (C-Level Abstraction - Compiled separately or linked)
  * ========================================================================= */
 void mlov_print_int(int64_t val) {
     printf("%ld\n", val);
@@ -101,40 +106,30 @@ uint64_t get_hardware_signature(void) {
  * Security Gatekeeper Assembly Output (Target Binary Routine)
  * ========================================================================= */
 void generate_runtime_header(FILE *out, SecurityContext *sec_ctx) {
-    fprintf(out, "// --- KAORU RUNTIME SECURITY GUARD (EMBEDDED IN TARGET BINARY) ---\n");
-    fprintf(out, "#include <stdio.h>\n");
-    fprintf(out, "#include <stdlib.h>\n");
-    fprintf(out, "#include <stdbool.\n\n");
-    
-    if (sec_ctx) {
-        fprintf(out, "static const unsigned long long AUTHORIZED_HARDWARE_HASH = 0x%llXULL;\n", 
-                (unsigned long long)sec_ctx->hardware_hash);
-        fprintf(out, "static const bool HAS_DISK_READ_PERM = %s;\n\n", 
-                (sec_ctx->permissions & PERM_DISK_READ) ? "true" : "false");
-    }
+    fprintf(out, "# --- KAORU RUNTIME ASSEMBLY GENERATED FILE ---\n");
+#if defined(__x86_64__) || defined(_M_X64)
+    fprintf(out, ".intel_syntax noprefix\n");
+#endif
 
-    fprintf(out, "void verify_hardware_and_permissions() {\n");
-    fprintf(out, "    unsigned long long current_cpuid = get_hardware_signature();\n");
-    fprintf(out, "    if (AUTHORIZED_HARDWARE_HASH != 0 && current_cpuid != AUTHORIZED_HARDWARE_HASH) {\n");
-    fprintf(out, "        printf(\"[Marlov Runtime Error]: Hardware signature mismatch! Unauthorized device.\\n\");\n");
-    fprintf(out, "        exit(137);\n");
-    fprintf(out, "    }\n");
-    fprintf(out, "}\n\n");
+    /* 
+     * Emit .text section explicitly first to anchor overall code generation
+     */
+    fprintf(out, ".text\n");
+
+    if (sec_ctx) {
+        fprintf(out, "# Authorized Hardware Hash: 0x%llX\n", (unsigned long long)sec_ctx->hardware_hash);
+        fprintf(out, "# Permissions Mask: 0x%X\n\n", sec_ctx->permissions);
+    }
 }
 
-void generate_assembly_entry(FILE *out, SecurityContext *ctx) {
-    (void)ctx;
-
-#if defined(__x86_64__) || defined(_M_X64)
-    fprintf(out, ".global main\n");
-    fprintf(out, "main:\n");
-    fprintf(out, "    push rbp\n");
-    fprintf(out, "    mov rbp, rsp\n");
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    fprintf(out, ".global main\n");
-    fprintf(out, "main:\n");
-    fprintf(out, "    stp x29, x30, [sp, #-16]!\n");
-    fprintf(out, "    mov x29, sp\n");
+/* 
+ * Add non-executable stack note directive at the END of code generation file
+ * or inside a dedicated footer function to prevent spilling into .text
+ */
+void generate_runtime_footer(FILE *out) {
+#if defined(__ELF__) || defined(__linux__)
+    fprintf(out, "\n# Suppress non-executable stack linker warning\n");
+    fprintf(out, ".section .note.GNU-stack,\"\",@progbits\n");
 #endif
 }
 
@@ -176,26 +171,31 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             break;
         }
 
-        case NODE_VAR_REF:
-            fprintf(out, "    ; Symbol reference: %s\n", node->var_name);
+        case NODE_VAR_REF: {
+            int off = get_safe_offset(node->stack_offset);
+            /* Check if the first character is not null byte */
+            fprintf(out, "    # Symbol reference: %s\n", (node->var_name[0] != '\0') ? node->var_name : "unnamed");
 #if defined(__x86_64__) || defined(_M_X64)
-            fprintf(out, "    mov rax, [rbp - %d]\n", node->stack_offset);
+            fprintf(out, "    mov rax, QWORD PTR [rbp - %d]\n", off);
 #elif defined(__aarch64__) || defined(_M_ARM64)
-            fprintf(out, "    ldr x0, [x29, #-%d]\n", node->stack_offset);
+            fprintf(out, "    ldr x0, [x29, #-%d]\n", off);
 #endif
             break;
-
-        case NODE_VAR_DECL:
+        }
+        case NODE_VAR_DECL: {
             if (node->left) {
                 generate_code_from_ast(out, node->left, sec_ctx);
             }
-            fprintf(out, "    ; Variable Decl: %s initialized at offset -%d\n", node->var_name, node->stack_offset);
+            int off = get_safe_offset(node->stack_offset);
+            /* Check if the first character is not null byte */
+            fprintf(out, "    # Variable Decl: %s initialized at offset -%d\n", (node->var_name[0] != '\0') ? node->var_name : "unnamed", off);
 #if defined(__x86_64__) || defined(_M_X64)
-            fprintf(out, "    mov [rbp - %d], rax\n", node->stack_offset);
+            fprintf(out, "    mov QWORD PTR [rbp - %d], rax\n", off);
 #elif defined(__aarch64__) || defined(_M_ARM64)
-            fprintf(out, "    str x0, [x29, #-%d]\n", node->stack_offset);
+            fprintf(out, "    str x0, [x29, #-%d]\n", off);
 #endif
             break;
+        }
 
         case NODE_BLOCK:
             generate_block_asm(out, node, sec_ctx);
@@ -234,7 +234,7 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             break;
 
         case NODE_EXIT:
-            fprintf(out, "    ; --- @exit Statement ---\n");
+            fprintf(out, "    # --- @exit Statement ---\n");
             generate_code_from_ast(out, node->left, sec_ctx); 
 #if defined(__x86_64__) || defined(_M_X64)
             fprintf(out, "    mov rdi, rax\n");
@@ -280,7 +280,7 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             break;
 
         case NODE_PANIC:
-            fprintf(out, "    ; --- @panic Statement ---\n");
+            fprintf(out, "    # --- @panic Statement ---\n");
             generate_code_from_ast(out, node->left, sec_ctx);
 #if defined(__x86_64__) || defined(_M_X64)
             fprintf(out, "    mov rdi, rax\n");
@@ -293,7 +293,7 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             break;
 
         default:
-            fprintf(out, "    ; [CodeGen]: Unhandled AST Node type (%d)\n", node->type);
+            fprintf(out, "    # [CodeGen]: Unhandled AST Node type (%d)\n", node->type);
             break;
     }
 }
@@ -308,7 +308,7 @@ void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
     fprintf(out, "%s:\n", node->var_name);
 
     /* Calculate frame size (aligned to 16 bytes for System V ABI / ARM64) */
-    int raw_stack_size = node->local_stack_size;
+    int raw_stack_size = (node->local_stack_size < 32) ? 32 : node->local_stack_size;
     int aligned_stack_size = (raw_stack_size + 15) & ~15;
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -325,14 +325,13 @@ void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
     }
 #endif
 
-    fprintf(out, "    ; Bind parameters (%d count)\n", node->param_count);
+    fprintf(out, "    # Bind parameters (%d count)\n", node->param_count);
     for (int i = 0; i < node->param_count; i++) {
         if (i < 6) {
-            fprintf(out, "    ; param [%s] passed via %s\n", node->params[i], ARG_REGS[i]);
-            /* Optional: Store arguments into parameter stack slots if stack_offset is mapped */
+            fprintf(out, "    # param [%s] passed via %s\n", node->params[i], ARG_REGS[i]);
             if (node->param_stack_offsets && node->param_stack_offsets[i] > 0) {
 #if defined(__x86_64__) || defined(_M_X64)
-                fprintf(out, "    mov [rbp - %d], %s\n", node->param_stack_offsets[i], ARG_REGS[i]);
+                fprintf(out, "    mov QWORD PTR [rbp - %d], %s\n", node->param_stack_offsets[i], ARG_REGS[i]);
 #elif defined(__aarch64__) || defined(_M_ARM64)
                 fprintf(out, "    str %s, [x29, #-%d]\n", ARG_REGS[i], node->param_stack_offsets[i]);
 #endif
@@ -358,7 +357,7 @@ void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 void generate_func_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_FUNC_CALL) return;
 
-    fprintf(out, "    ; --- Function Call: %s (%d args) ---\n", node->var_name, node->arg_count);
+    fprintf(out, "    # --- Function Call: %s (%d args) ---\n", node->var_name, node->arg_count);
 
     /* Evaluate args and push onto stack */
     for (int i = 0; i < node->arg_count; i++) {
@@ -382,11 +381,10 @@ void generate_func_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
     }
 
 #if defined(__x86_64__) || defined(_M_X64)
-    /* Stack alignment check and cleanup if args > 6 */
     if (node->arg_count > 6) {
         int stack_args = node->arg_count - 6;
         if (stack_args % 2 != 0) {
-            fprintf(out, "    sub rsp, 8\n"); // Keep 16-byte alignment
+            fprintf(out, "    sub rsp, 8\n");
         }
     }
     fprintf(out, "    call %s\n", node->var_name);
@@ -403,7 +401,7 @@ void generate_func_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 void generate_return_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_RETURN) return;
 
-    fprintf(out, "    ; --- Return Statement ---\n");
+    fprintf(out, "    # --- Return Statement ---\n");
     if (node->left) {
         generate_code_from_ast(out, node->left, sec_ctx);
     }
@@ -425,10 +423,10 @@ void generate_return_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_BUILTIN_CALL) return;
 
-    fprintf(out, "    ; --- Directives Call: Builtin %d ---\n", node->builtin_kind);
+    fprintf(out, "    # --- Directives Call: Builtin %d ---\n", node->builtin_kind);
 
     if (node->builtin_kind == BUILTIN_SIZEOF) {
-        fprintf(out, "    ; Builtin sizeof evaluation\n");
+        fprintf(out, "    # Builtin sizeof evaluation\n");
 #if defined(__x86_64__) || defined(_M_X64)
         fprintf(out, "    mov rax, 8\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
@@ -481,7 +479,7 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
         case BUILTIN_FREE:   target_func = "free"; break;
         case BUILTIN_EXIT:   target_func = "exit"; break;
         default:
-            fprintf(out, "    ; Unknown builtin call mapping\n");
+            fprintf(out, "    # Unknown builtin call mapping\n");
             return;
     }
 
@@ -499,11 +497,11 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
  * ========================================================================= */
 void generate_block_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_BLOCK) return;
-    fprintf(out, "    ; --- Scope Block ENTER ---\n");
+    fprintf(out, "    # --- Scope Block ENTER ---\n");
     for (int i = 0; i < node->stmt_count; i++) {
         generate_code_from_ast(out, node->statements[i], sec_ctx);
     }
-    fprintf(out, "    ; --- Scope Block EXIT ---\n");
+    fprintf(out, "    # --- Scope Block EXIT ---\n");
 }
 
 /* =========================================================================
@@ -512,7 +510,7 @@ void generate_block_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 void generate_print_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != PRINT_NODE || !node->left) return;
     generate_code_from_ast(out, node->left, sec_ctx);
-    fprintf(out, "    ; --- @print Statement ---\n");
+    fprintf(out, "    # --- @print Statement ---\n");
 
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, "    mov rdi, rax\n");
@@ -537,7 +535,7 @@ void generate_if_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_IF || !node->cond) return;
 
     int cur_id = label_counter++;
-    fprintf(out, "    ; --- If Statement Start ---\n");
+    fprintf(out, "    # --- If Statement Start ---\n");
     
     generate_code_from_ast(out, node->cond, sec_ctx);
 
@@ -570,7 +568,7 @@ void generate_if_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     }
 
     fprintf(out, ".L_end_if_%d:\n", cur_id);
-    fprintf(out, "    ; --- If Statement End ---\n");
+    fprintf(out, "    # --- If Statement End ---\n");
 }
 
 /* =========================================================================
@@ -580,7 +578,7 @@ void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_WHILE || !node->cond) return;
 
     int cur_id = label_counter++;
-    fprintf(out, "    ; --- While Statement Start ---\n");
+    fprintf(out, "    # --- While Statement Start ---\n");
     fprintf(out, ".L_while_start_%d:\n", cur_id);
 
     generate_code_from_ast(out, node->cond, sec_ctx);
@@ -601,7 +599,7 @@ void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 #endif
 
     fprintf(out, ".L_while_end_%d:\n", cur_id);
-    fprintf(out, "    ; --- While Statement End ---\n");
+    fprintf(out, "    # --- While Statement End ---\n");
 }
 
 /* =========================================================================
@@ -611,7 +609,7 @@ void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_FOR) return;
 
     int cur_id = label_counter++;
-    fprintf(out, "    ; --- For Loop Start ---\n");
+    fprintf(out, "    # --- For Loop Start ---\n");
 
     if (node->for_init) {
         generate_code_from_ast(out, node->for_init, sec_ctx);
@@ -644,7 +642,7 @@ void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 #endif
 
     fprintf(out, ".L_for_end_%d:\n", cur_id);
-    fprintf(out, "    ; --- For Loop End ---\n");
+    fprintf(out, "    # --- For Loop End ---\n");
 }
 
 /* =========================================================================
@@ -656,21 +654,22 @@ void generate_unary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     switch (node->type) {
         case NODE_DEREF:
             generate_code_from_ast(out, node->left, sec_ctx);
-            fprintf(out, "    ; --- Dereference Pointer (*p) ---\n");
+            fprintf(out, "    # --- Dereference Pointer (*p) ---\n");
 #if defined(__x86_64__) || defined(_M_X64)
-            fprintf(out, "    mov rax, [rax]\n");
+            fprintf(out, "    mov rax, QWORD PTR [rax]\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
             fprintf(out, "    ldr x0, [x0]\n");
 #endif
             break;
 
         case NODE_ADDR_OF:
-            fprintf(out, "    ; --- Address Of (&var) ---\n");
+            fprintf(out, "    # --- Address Of (&var) ---\n");
             if (node->left && node->left->type == NODE_VAR_REF) {
+                int off = get_safe_offset(node->left->stack_offset);
 #if defined(__x86_64__) || defined(_M_X64)
-                fprintf(out, "    lea rax, [rbp - %d]\n", node->left->stack_offset); 
+                fprintf(out, "    lea rax, [rbp - %d]\n", off); 
 #elif defined(__aarch64__) || defined(_M_ARM64)
-                fprintf(out, "    sub x0, x29, #%d\n", node->left->stack_offset);
+                fprintf(out, "    sub x0, x29, #%d\n", off);
 #endif
             }
             break;
@@ -686,7 +685,7 @@ void generate_unary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 void generate_index_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_INDEX) return;
 
-    fprintf(out, "    ; --- Array Indexing / Pointer Offset Access ---\n");
+    fprintf(out, "    # --- Array Indexing / Pointer Offset Access ---\n");
     generate_code_from_ast(out, node->right, sec_ctx);
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, "    push rax\n");
@@ -700,7 +699,7 @@ void generate_index_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     fprintf(out, "    pop rbx\n");
     fprintf(out, "    shl rbx, 3\n");
     fprintf(out, "    add rax, rbx\n");
-    fprintf(out, "    mov rax, [rax]\n");
+    fprintf(out, "    mov rax, QWORD PTR [rax]\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
     fprintf(out, "    ldr x1, [sp], #16\n");
     fprintf(out, "    lsl x1, x1, #3\n");
@@ -717,9 +716,9 @@ void generate_byte_access_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx
 
     if (node->type == NODE_LOAD_BYTE) {
         generate_code_from_ast(out, node->left, sec_ctx);
-        fprintf(out, "    ; --- Load Byte (8-bit Read) ---\n");
+        fprintf(out, "    # --- Load Byte (8-bit Read) ---\n");
 #if defined(__x86_64__) || defined(_M_X64)
-        fprintf(out, "    movzx rax, byte ptr [rax]\n");
+        fprintf(out, "    movzx rax, BYTE PTR [rax]\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
         fprintf(out, "    ldrb w0, [x0]\n");
 #endif
@@ -735,7 +734,7 @@ void generate_byte_access_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx
 
 #if defined(__x86_64__) || defined(_M_X64)
         fprintf(out, "    pop rbx\n");
-        fprintf(out, "    mov byte ptr [rax], bl\n");
+        fprintf(out, "    mov BYTE PTR [rax], bl\n");
 #elif defined(__aarch64__) || defined(_M_ARM64)
         fprintf(out, "    ldr x1, [sp], #16\n");
         fprintf(out, "    strb w1, [x0]\n");

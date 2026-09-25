@@ -23,7 +23,7 @@ static void cleanup_symbol_table(SymbolTable *symtab) {
     Symbol *curr = symtab->head;
     while (curr) {
         Symbol *next = curr->next;
-        free(curr); // Clean up symbol allocations correctly
+        free(curr);
         curr = next;
     }
     symtab->head = NULL;
@@ -39,6 +39,7 @@ int main(int argc, char *argv[]) {
     const char *header_file = NULL;
     const char *output_file = "a.out";
     bool dump_ast = false;
+    (void)dump_ast;
 
     /* CLI Arguments Parser */
     for (int i = 1; i < argc; i++) {
@@ -66,7 +67,7 @@ int main(int argc, char *argv[]) {
     SymbolTable symtab = { .head = NULL };
     SecurityContext sec_ctx = { .permissions = 0, .hardware_hash = 0 };
 
-    /* 1. Parse .mlov Header File (If provided via CLI or directive) */
+    /* 1. Parse .mlov Header File */
     if (header_file) {
         printf("[Kaoru Compiler]: Loading Header '%s'...\n", header_file);
         if (!parse_mlov_header(header_file, &symtab, &sec_ctx)) {
@@ -87,7 +88,7 @@ int main(int argc, char *argv[]) {
     ASTNode *root = parse_with_symbols(source, &symtab);
     fclose(source);
 
-    /* 3. Code Generation */
+    /* 3. Code Generation Pipeline (Fixed) */
     FILE *file_out = fopen(output_file, "w");
     if (!file_out) {
         printf("[Kaoru Fatal Error]: Cannot open output file '%s'\n", output_file);
@@ -96,13 +97,17 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // Step A: Header & Target Setup
     generate_runtime_header(file_out, &sec_ctx);
-    generate_assembly_entry(file_out, &sec_ctx);
 
+    // Step B: Generate AST instructions
     if (root) {
         generate_code_from_ast(file_out, root, &sec_ctx);
         free_ast(root);
     }
+
+    // Step C: Footer Metadata & GNU Stack Note
+    generate_runtime_footer(file_out);
 
     fclose(file_out);
     printf("[Kaoru Compiler]: Successfully compiled '%s' using symbols from '%s' -> '%s'\n", 

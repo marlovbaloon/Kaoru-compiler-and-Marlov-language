@@ -2,20 +2,21 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-extern void marlov_test_scope();
+extern void marlov_test_scope(void);
 
-void cpp_test_scope() {
+void cpp_test_scope(void) {
     volatile uint64_t a = 1;
     {
         volatile uint64_t b = 2;
         if (a == b) {
             volatile uint64_t c = 3;
+            (void)c; // Prevent unused variable warning
             return; 
         }
     }
 }
 
-void verify_stack_invariant(void (*func)(), const char* lang_name) {
+void verify_stack_invariant(void (*func)(void), const char* lang_name) {
     uint64_t sp_before = 0;
     uint64_t sp_after = 0;
 
@@ -35,10 +36,9 @@ void verify_stack_invariant(void (*func)(), const char* lang_name) {
     printf("Aligned 8  : %s\n\n", is_aligned ? "PASS" : "FAIL");
 }
 
-int main() {
+int main(void) {
     verify_stack_invariant(cpp_test_scope, "C/C++ (GCC/LLVM)");
-    
-    // verify_stack_invariant(marlov_test_scope, "Marlov (Kaoru Compiler)");
+    verify_stack_invariant(marlov_test_scope, "Marlov (Kaoru Compiler)");
     
     return 0;
 }

@@ -1,7 +1,7 @@
 # Toolchain setup
 CC = gcc
 CFLAGS = -O0 -g -Wall
-KAORUC = kaoru-compiler
+KAORUC = ./kaoru-compiler
 
 # Build outputs
 TARGET = run_benchmark
@@ -16,8 +16,10 @@ benchmark.o: benchmark.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 test_scope.o: test_scope.ml
-	# Compile Marlov down to x64 object file
-	$(KAORUC) --target=x64 -c $< -o $@
+	# 1
+	$(KAORUC) --target=x64 -c $< -o test_scope.s
+	# 2
+	$(CC) -c test_scope.s -o $@
 
 clean:
-	rm -f *.o $(TARGET)
+	rm -f *.o *.s $(TARGET)
