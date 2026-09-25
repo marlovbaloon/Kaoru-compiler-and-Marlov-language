@@ -9,6 +9,9 @@
 \usepackage{listings}
 \usepackage{tikz}
 \usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{microtype}
+\usepackage{url}
 \usepackage{hyperref}
 \usetikzlibrary{shapes.geometric, arrows, positioning}
 
@@ -18,7 +21,7 @@
 
 \author{\IEEEauthorblockN{Asira "Marlov" Langphang}
 \IEEEauthorblockA{\textit{Department of Digital Business} \\
-\textit{Thai Business Administration Technological College}\\
+\textit{THARNTECHNOLOGICAL COLLEGE}\\
 Email: marlovbaloon@gmail.com \\
 Repository: \url{https://github.com/marlovbaloon/Kaoru-compiler-and-Marlov-language}}
 }
@@ -26,7 +29,7 @@ Repository: \url{https://github.com/marlovbaloon/Kaoru-compiler-and-Marlov-langu
 \maketitle
 
 \begin{abstract}
-Analyzing the worst-case peak stack depth ($\mathrm{Stack}_{\mathrm{Peak}}$) for general-purpose programming languages on bare-metal embedded systems is mathematically undecidable (Rice's Theorem) due to recursion and dynamic dispatching. Adopting general-purpose compilers like GCC or LLVM in safety-critical domains relies heavily on Control Flow Graph (CFG) inference within the back-end, which fluctuates under optimization levels and risks structural drift. This paper introduces the \textbf{Marlov Language}, a domain-specific language engineered with a non-recursive architecture that strictly restricts the call graph to a complete Directed Acyclic Graph (DAG). Paired with the \textbf{Kaoru Compiler}, we propose an AST-driven empirical stack reclamation paradigm operating directly in the front-end. By shifting memory intent to AST scope triggers, the system bypasses complex back-end liveness analysis and deterministically emits ARM Thumb-2 instructions (\texttt{ADD SP, SP, \#N}) enforcing AAPCS 8-byte alignment in a linear $1:1$ fashion. We formally prove stack preservation invariants ($sp_{\text{exit}} = sp_0$) and hardware alignment invariants ($sp \equiv 0 \pmod 8$) using Structural Operational Semantics. Empirical evaluations confirm that the combination of the Marlov language and the Kaoru Compiler transforms the system-wide $\mathrm{Stack}_{\mathrm{Peak}}$ determination into a compile-time deterministic decision in $\mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{})$ time while completely eliminating runtime cleanup overhead.
+Analyzing the worst-case peak stack depth ($\mathrm{Stack}_{\mathrm{Peak}}$) for general-purpose programming languages on bare-metal embedded systems is mathematically undecidable (Rice's Theorem) due to recursion and dynamic dispatching. Adopting general-purpose compilers like GCC or LLVM in safety-critical domains relies heavily on Control Flow Graph (CFG) inference within the back-end, which fluctuates under optimization levels and risks structural drift. This paper introduces the \textbf{Marlov Language}, a domain-specific language engineered with a non-recursive architecture that strictly restricts the call graph to a complete Directed Acyclic Graph (DAG). Paired with the \textbf{Kaoru Compiler}, we propose an AST-driven empirical stack reclamation paradigm operating directly in the front-end. By shifting memory intent to AST scope triggers, the system bypasses complex back-end liveness analysis and deterministically emits ARM Thumb-2 instructions (\texttt{ADD SP, SP, \#N}) enforcing AAPCS 8-byte alignment in a linear $1:1$ fashion. We formally prove stack preservation invariants ($sp_{\text{exit}} = sp_0$) and hardware alignment invariants ($sp \equiv 0 \pmod 8$) using Structural Operational Semantics. Empirical evaluations confirm that the combination of the Marlov language and the Kaoru Compiler transforms the system-wide $\mathrm{Stack}_{\mathrm{Peak}}$ determination into a compile-time deterministic decision in $\mathcal{O}(|V| + |E|)$ time while completely eliminating runtime cleanup overhead.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -70,7 +73,8 @@ Table~\ref{tab:comparison} highlights the structural distinctions between conven
 \caption{Architectural Comparison Across Compiler Paradigms}
 \label{tab:comparison}
 \centering
-\begin{tabular}{p{3.2cm}p{4cm}p{4cm}p{4.8cm}}
+\small
+\begin{tabular}{llll}
 \toprule
 \textbf{Dimension} & \textbf{GCC / LLVM (C/C++)} & \textbf{Rust (rustc)} & \textbf{Kaoru Compiler (Marlov)} \\
 \midrule
@@ -78,7 +82,7 @@ Table~\ref{tab:comparison} highlights the structural distinctions between conven
 \textbf{Call Graph Structure} & Cyclic / Dynamic & Cyclic / Dynamic & \textbf{Strict DAG (Directed Acyclic Graph)} \\
 \textbf{Reclamation Trigger} & Back-end Liveness on CFG & MIR Drop Flags + LLVM & \textbf{Front-end AST Scope Trigger} \\
 \textbf{Stack Layout Predictability} & Variable (Flag dependent) & Variable (LLVM Backend) & \textbf{100\% Deterministic ($1:1$ Static)} \\
-\textbf{$\mathrm{Stack}\_{\mathrm{Peak}}$ Computation} & Undecidable ($\mathcal{O}(\infty)$ with recursion) & Undecidable & \textbf{Compile-time Decidable ($\mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{})$)} \\
+\textbf{$\mathrm{Stack}_{\mathrm{Peak}}$ Computation} & Undecidable ($\mathcal{O}(\infty)$) & Undecidable & \textbf{Compile-time Decidable ($\mathcal{O}(|V| + |E|)$)} \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -118,11 +122,11 @@ Enforcing these axioms allows the Kaoru Compiler pipeline to reduce to four dire
 Let a configuration state be defined by the tuple $\langle \mathcal{S}, \sigma, sp \rangle$, where $\mathcal{S}$ represents the AST node, $\sigma$ denotes the store mapping, and $sp \in \mathbb{N} \pmod 8$ is the hardware stack pointer. The transition relation is expressed as:
 \[\langle \mathcal{S}, \sigma, sp \rangle \longrightarrow \langle \mathcal{S}', \sigma', sp' \rangle\]
 
-The alignment operator is formally defined as:
+The alignment operator is formally defined as
 \[\mathrm{Align8}(x) \triangleq (x + 7) \land \neg 7\]
-where $\forall x \in \mathbb{N}, \quad \mathrm{Align8}(x) \equiv 0 \pmod 8$.
+where   $\forall x \in \mathbb{N}, \quad \mathrm{Align8}(x) \equiv 0 \pmod 8$.
 
-The frame allocation metric for scope block $B$ is given by:
+The frame allocation metric for the scope block $B$ is given by:
 \[\mathrm{SizeOfScope}(B) \triangleq \mathrm{Align8}\left( \sum_{v \in \mathrm{Vars}(B)} \mathrm{sizeof}(v) \right)\]
 
 Inference rules governing scope transitions are defined as follows:
@@ -137,28 +141,33 @@ Inference rules governing scope transitions are defined as follows:
 
 \textbf{Theorem 1 (Local Scope Stack Preservation Invariant):} 
 For any valid AST scope block $B$,
-\[\forall B \in \text{AST}, \quad \langle B, \sigma, sp_0 \rangle \longrightarrow^* \langle \text{skip}, \sigma', sp_{\text{exit}} \rangle \implies sp_{\text{exit}} = sp_0\]
-
+\[\text{exec}(B, \sigma, sp_0) = (\sigma', sp_e) \implies sp_e = sp_0\]
 \textbf{Theorem 2 (Bounded Global Stack Depth Decidability):} 
-Given that the Marlov Call Graph $G = (V, E)$ is a Directed Acyclic Graph (DAG), the peak global stack depth is compile-time decidable:
+Given that the Marlov Call Graph $G = (V, E)$ is a Directed Acyclic Graph (DAG):
 \[\mathrm{Stack}_{\mathrm{Peak}} = \max_{p \in \text{Paths}(G)} \left( \sum_{f \in p} \mathrm{FrameSize}(f) \right)\]
-with computational complexity bounded by $\mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{})$.
+with computational complexity bounded by $\mathcal{O}(|V| + |E|)$.
 
 \textbf{Lemma 1 (Hardware Alignment Preservation):}
-\[\forall sp_0 \equiv 0 \pmod 8, \quad sp_{\text{mid}} = sp_0 - \mathrm{SizeOfScope}(B) \implies sp_{\text{mid}} \equiv 0 \pmod 8\]
-
+{\[sp_0 \in 8\mathbb{Z}, \ sp_m = sp_0 - S_B \implies sp_m \in 8\mathbb{Z}\]
+}
 \subsection{Mathematical Proofs}
 
 \textbf{Proof of Alignment Operator ($\mathrm{Align8}$):}
-In two's complement representation, bitwise $\neg 7$ clears the three least significant bits (\texttt{000}). Performing a bitwise AND between $(x + 7)$ and $\neg 7$ guarantees that the resulting integer's lowest three bits are zero. Any integer with its three lowest bits cleared is divisible by $2^3 = 8$, satisfying $x \equiv 0 \pmod 8$. $\blacksquare$
+In two's complement representation, bitwise $\neg 7$ clears the three least significant bits (\texttt{000}). Performing a bitwise AND between $(x + 7)$ and $\neg 7$ guaranties that the resulting integer's lowest three bits are zero. Any integer with its three lowest bits cleared is divisible by $2^3 = 8$, satisfying $x \equiv 0 \pmod 8$. $\blacksquare$
 
 \textbf{Proof of Theorem 1 (Local Stack Preservation):}
-Applying transition rules \text{[E-ENTER]}, \text{[E-EXEC]}, and \text{[E-EXIT]} sequentially yields:
-\[sp_0 \xrightarrow{\text{ENTER}} sp_1 = sp_0 - N \xrightarrow{\text{EXEC}} sp_2 = sp_0 - N \xrightarrow{\text{EXIT}} sp_{\text{exit}} = sp_2 + N\]
+Applying the transition rules \text{[E-ENTER]}, \text{[E-EXEC]}, and \text{[E-EXIT]} sequentially yields the following.
+\[
+\begin{aligned}
+sp_0 &\xrightarrow{\text{ENTER}} sp_1 = sp_0 - N \\
+     &\xrightarrow{\text{EXEC}}  sp_2 = sp_0 - N \\
+     &\xrightarrow{\text{EXIT}}  sp_{\text{exit}} = sp_2 + N
+\end{aligned}
+\]
 Substituting terms gives $sp_{\text{exit}} = (sp_0 - N) + N = sp_0$. Thus, the stack pointer upon exiting any scope block strictly equals its initial state, preventing stack frame drift. $\blacksquare$
 
 \textbf{Proof of Theorem 2 (Global Stack Depth Decidability):}
-By Axioms 1 and 2, the call graph $G = (V, E)$ is guaranteed to be a DAG. Consequently, topological sorting can be applied over all execution paths. Finding $\mathrm{Stack}_{\mathrm{Peak}}$ reduces to the Longest Path Problem on a DAG, which yields a deterministic solution solvable in linear time $\mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{})$ during compilation. $\blacksquare$
+By Axioms 1 and 2, the call graph $G = (V, E)$ is guaranteed to be a DAG. Consequently, topological sorting can be applied to all execution paths. Finding $\mathrm{Stack}_{\mathrm{Peak}}$ reduces to the Longest Path Problem on a DAG, which yields a deterministic solution solvable in linear time $\mathcal{O}(|V| + |E|)$ during compilation. $\blacksquare$
 
 \textbf{Proof of Lemma 1 (Hardware Alignment Preservation):}
 Assume $sp_0 = 8k$ ($k \in \mathbb{N}$). By definition of the alignment operator, $N = \mathrm{SizeOfScope}(B) = 8m$ ($m \in \mathbb{N}$). It follows that:
@@ -167,30 +176,32 @@ Because $(k - m) \in \mathbb{Z}$, $sp_{\text{mid}}$ remains divisible by 8, guar
 
 \section{Verification and Empirical Validation}
 
-The evaluation framework follows an **Empirical Invariant Validation** methodology, prioritizing mathematical correctness and structural preservation over raw throughput metrics. Current testing phase execution was performed on an x64 host architecture (Linux/x86\_64) to validate front-end AST scope reclamation semantics, IR transformation correctness, and $\mathrm{Stack}_{\mathrm{Peak}}$ calculations, combined with QEMU simulation models for ARM Cortex-M targets.
+The evaluation framework follows an \textbf{Empirical Invariant Validation} methodology, prioritizing mathematical correctness and structural preservation over raw throughput metrics. Current testing phase execution was performed on an x64 host architecture (Linux/x86\_64) to validate front-end AST scope reclamation semantics, IR transformation correctness, and $\mathrm{Stack}_{\mathrm{Peak}}$ calculations, combined with QEMU simulation models for ARM Cortex-M targets.
 
 \begin{table}[htbp]
 \caption{Empirical Validation Summary}
 \label{tab:validation}
 \centering
+\small
 \begin{tabular}{lll}
 \toprule
-\textbf{Metric} & \textbf{GCC Target Class} & \textbf{Kaoru (Marlov)} \\
+\textbf{Metric} & \textbf{GCC Target} & \textbf{Kaoru (Marlov)} \\
 \midrule
-Call Graph Structure & Cyclic / Dynamic & \textbf{Strict DAG (Axiomatic)} \\
-Global Stack Bounds & Undecidable & \textbf{100\% Compile-time Decidable} \\
-Stack Frame Alignment & System V AMD64 & \textbf{Guaranteed 8-byte / 16-byte} \\
-Reclamation Overhead & Dynamic Liveness & \textbf{Explicit $\mathcal{O}(1)$ AST Insertion} \\
-Unwinding Drift ($sp_{\text{exit}}$) & Risk on Refactor & \textbf{Zero Drift ($sp\_{\text{exit}} = sp\_0$)} \\
+Call Graph & Cyclic / Dynamic & \textbf{Strict DAG (Axiomatic)} \\
+Stack Bounds & Undecidable & \textbf{100\% Decidable} \\
+Frame Alignment & System V AMD64 & \textbf{Guaranteed 8/16-byte} \\
+Reclamation & Dynamic Liveness & \textbf{Explicit $\mathcal{O}(1)$ AST} \\
+Unwinding Drift & Risk on Refactor & \textbf{Zero ($sp_{\text{exit}} = sp_0$)} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+
 \subsection{Empirical Observations}
 Key results obtained from test builds and emitted code inspection include:
 \begin{itemize}
-    \item \textbf{Zero Unwinding Drift ($sp\_{\text{exit}} = sp\_0$):} Scope executions, including early returns and complex nested blocks, accurately emitted stack pointer restoration instructions matching Theorem 1 assertions.
-    \item \textbf{Compile-time Deterministic Footprint:} Non-recursive call graph constraints allowed the Kaoru Compiler to statically calculate and output overall system peak stack depth ($\mathrm{Stack}_{\mathrm{Peak}}$) in $\mathcal{O}(\vert{}V\vert{} + \vert{}E\vert{})$ processing time.
+    \item \textbf{Zero Unwinding Drift ($sp_{\text{exit}} = sp_0$):} Scope executions, including early returns and complex nested blocks, accurately emitted stack pointer restoration instructions matching Theorem 1 assertions.
+    \item \textbf{Compile-time Deterministic Footprint:} Non-recursive call graph constraints allowed the Kaoru Compiler to statically calculate and output overall system peak stack depth ($\mathrm{Stack}_{\mathrm{Peak}}$) in $\mathcal{O}(|V| + |E|)$ processing time.
     \item \textbf{AST Scope Reclamation Validity:} Front-end AST scope boundary triggers operated reliably without relying on back-end Control Flow Graph (CFG) analysis.
 \end{itemize}
 
