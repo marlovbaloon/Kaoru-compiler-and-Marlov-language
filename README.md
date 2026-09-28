@@ -30,7 +30,7 @@ To overcome this constraint in highly limited SRAM environments:
 * **Bare-Metal Memory & Pointer Primitives:** Full support for dereferencing (`*p`), address-of (`&x`), 8-bit byte-level loads/stores (`load_b`, `store_b`), and array indexing.
 * **Bitwise & Arithmetic Operations:** Supports arithmetic, relational, and low-level bitwise logic (`&`, `|`, `^`, `<<`, `>>`).
 * **Hardware Signature Guard:** Compiles hardware CPU fingerprint checks into target binaries (`cpuid`, MIDR_EL1, ARM p15) for execution authorization.
-
+Running make test or test harness is designed to emit bare-metal assembly targets (e.g., test_scope.s) to formally inspect Stack Reclamation and Align8 Invariants. It does not contain GUI visualizers. Inspect emitted .s files to verify sub rsp, N alignment bounds and scope exit semantics.
 ---
 
 ## Source File Overview
