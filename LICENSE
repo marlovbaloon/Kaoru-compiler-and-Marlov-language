@@ -1,21 +1,27 @@
-MIT License
+Business Source License 1.1
+Licensor: Arsira Langphang (marlovbaloon@gmail.com)
+Licensed Work: Kaoru Compiler Pipeline and Marlov Language Specifications (including mlexer, mparser, mir, mcodegen, and associated source files)
 
-Copyright (c) 2026 Marlov
+Change Date: 2030-01-01
+Change License: Change License: GNU General Public License v3.0 or later (GPL-3.0-or-later)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. LICENSED WORK AND GRANT OF RIGHTS
+Subject to the terms and conditions herein, the Licensor hereby grants you a non-exclusive, royalty-free, worldwide license to use, copy, modify, and distribute the Licensed Work, provided that your use is strictly a Non-Production / Non-Commercial Use.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+2. LICENSED USE (NON-COMMERCIAL & RESEARCH)
+The following uses are explicitly permitted under this License:
+a. Academic research, educational instruction, and personal evaluation.
+b. Development and testing in non-production environments.
+c. Evaluation for research contributions, formal verification, and academic publication.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+3. ADDITIONAL USE GRANT (COMMERCIAL LIMITATIONS)
+Any Use of the Licensed Work in a Production Environment, or integrating the Licensed Work into commercial hardware/software products, embedded safety-critical systems deployed for profit, or commercial SaaS/cloud compilation services is strictly prohibited without a separate Commercial License granted by the Licensor.
+
+To obtain a Commercial License for industrial deployment, hardware binding, or custom compiler support, please contact the Licensor at: marlovbaloon@gmail.com
+
+4. CHANGE LICENSE
+On the Change Date specified above, or on such earlier date as determined by the Licensor, this License shall terminate and be automatically replaced by the Change License (GPL-3.0-or-later) for all versions of the Licensed Work published prior to the Change Date.
+
+5. NOTICE AND DISCLAIMER
+a. You must retain all copyright notices, license headers, and attribution references in all copies or substantial portions of the Licensed Work.
+b. THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE LICENSED WORK OR THE USE OR OTHER DEALINGS IN THE LICENSED WORK.
