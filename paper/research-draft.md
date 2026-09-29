@@ -335,3 +335,120 @@ endmodule
 การแลกเอาเวลาในการประมวลผลของคอมไพเลอร์ที่ยาวนาน (High Compile-Time Cost) เพื่อแลกกับวงจรฮาร์ดแวร์ที่สมบูรณ์แบบในภาวะรันไทม์ ถือเป็นทางเลือกที่คุ้มค่าอย่างยิ่งสำหรับระบบ Safety-Critical และ High-Frequency Trading ที่ไม่สามารถยอมรับความคลาดเคลื่อนเชิงเวลาได้แม้แต่นาโนวินาทีเดียว
 
 กรอบความคิด $U_{4D} = \langle V, E, \Phi \rangle$ ได้พิสูจน์ว่า เราสามารถปฏิบัติต่อเวลาในฐานะ "มิติทางกายภาพ" ของวงจรดิจิทัลได้สำเร็จ และเป็นรากฐานสำคัญในการพัฒนายอดคอมไพเลอร์สำหรับสถาปัตยกรรม Spatial Computing ในอนาคต
+---
+## Armv7-m simulator in pure c single-file
+---
+### 1. Abstract Machine State Tuple ($M$)
+
+เปลี่ยนจาก AST State Tuple $\langle \mathcal{S}, \sigma, sp \rangle$ เป็น **Armv7-M Register & Stack State Tuple**:
+
+$$M \triangleq \langle R, \mathcal{M}_{S}, sp \rangle$$
+
+* $R: \text{Reg} \to \mathbb{Z}_{2^{32}}$ คือ Mapping ของ Register ($R_0 \dots R_{12}, LR, PC$)
+* $\mathcal{M}_{S}: \mathbb{N} \to \mathbb{Z}_{8}$ คือ Physical SRAM Stack Memory Mapping
+* $sp \in \mathbb{N} \pmod 8$ คือ Physical Stack Pointer (จัดเก็บไว้ใน $R[SP]$ หรือ $R_{13}$)
+
+---
+
+### 2. AAPCS Frame Allocation Operator (Physical Lowering)
+
+ในระดับ AST คำนวณเฉพาะ local variables ($\mathit{SizeOfScope}(B)$) แต่ในระดับ Armv7-M Simulator ต้องคำนวณ **Physical Hardware Frame Overhead**:
+
+$$\text{FrameSize}_{\mathrm{ARM}}(f) \triangleq \text{Align8}\left( \mathit{SizeOfScope}(f) + 4 \cdot \vert{}\mathit{Regs}_{\mathrm{saved}}\vert{} + \mathit{SpillBytes}(f) \right)$$
+
+โดยที่:
+
+* $\mathit{Regs}_{\mathrm{saved}} \subseteq \{R_4 \dots R_{11}, LR\}$ คือ Callee-Saved Registers ตามข้อกำหนด AAPCS
+* $4 \cdot \vert{}\mathit{Regs}_{\mathrm{saved}}\vert{}$ คือ พื้นที่สำหรับการ `PUSH` ค่า Register เดิมลงสแต็ก
+* $\mathit{SpillBytes}(f)$ คือ ขนาดของ Register Spilling ที่เกิดจาก Backend Lowering
+
+---
+
+### 3. Transition Rules for Armv7-M Instruction Verification
+
+โมเดล Small-Step Operational Semantics สำหรับการจำลอง Instruction Set บน Single-File Pure C Verification Engine:
+
+#### [E-PUSH] (Prologue Frame Allocation & Registration)
+
+กฎการวิเคราะห์คำสั่ง `PUSH {Regs, LR}` ณ จุดเริ่มต้นฟังก์ชัน:
+
+$$\frac{N = 4 \cdot \vert{}\mathit{Regs} \cup \{LR\}\vert{}, \quad sp_1 = sp_0 - N}{\langle \text{PUSH } \{\mathit{Regs}, LR\}, R, \mathcal{M}_{S}, sp_0 \rangle \longrightarrow \langle \text{skip}, R', \mathcal{M}_{S}', sp_1 \rangle}$$
+
+$$\text{Premise Side-Condition: } sp_0 \equiv 0 \pmod 8 \implies sp_1 \equiv 0 \pmod 8 \quad (\text{via } N \text{ alignment enforcement})$$
+
+#### [E-SUB-SP] (AST Scope Space Allocation on Hardware)
+
+กฎการลบ $SP$ เพื่อจองพื้นที่ Local Variable ตามค่า $\text{Align8}(N)$ ที่คำนวณมาจาก AST:
+
+$$\frac{N = \mathit{SizeOfScope}(B)}{\langle \text{SUB } SP, SP, N, R, \mathcal{M}_{S}, sp_0 \rangle \longrightarrow \langle \text{skip}, R[SP \mapsto sp_0 - N], \mathcal{M}_{S}, sp_0 - N \rangle}$$
+
+#### [E-ADD-SP] (Scope Epilogue Restoration)
+
+กฎการบวก $SP$ คืนพื้นที่เมื่อจบ Scope Block:
+
+$$\frac{N = \mathit{SizeOfScope}(B)}{\langle \text{ADD } SP, SP, N, R, \mathcal{M}_{S}, sp_{\mathrm{mid}} \rangle \longrightarrow \langle \text{skip}, R[SP \mapsto sp_{\mathrm{mid}} + N], \mathcal{M}_{S}, sp_{\mathrm{mid}} + N \rangle}$$
+
+#### [E-POP] (Epilogue Frame Deallocation)
+
+กฎการวิเคราะห์คำสั่ง `POP {Regs, PC}` เพื่อออกจากฟังก์ชัน:
+
+$$\frac{N = 4 \cdot \vert{}\mathit{Regs} \cup \{PC\}\vert{}, \quad sp_{\mathrm{exit}} = sp_{\mathrm{mid}} + N}{\langle \text{POP } \{\mathit{Regs}, PC\}, R, \mathcal{M}_{S}, sp_{\mathrm{mid}} \rangle \longrightarrow \langle \text{skip}, R', \mathcal{M}_{S}, sp_{\mathrm{exit}} \rangle}$$
+
+---
+
+### 4. Machine-Level Invariant Theorems (นำไปการันตีใน Pure C Engine)
+
+#### Theorem 3 (Physical Equivalence & Soundness Invariant)
+
+ความสอดคล้องระหว่างการประมาณค่าเชิงทฤษฎีบน AST กับการรันจำลองจริงบน Single-File Simulator Engine:
+
+$$\forall f \in \text{Functions}, \quad \Delta sp_{\mathrm{AST}}(f) \le \Delta sp_{\mathrm{Sim}}(f)$$
+
+$$\text{where } \Delta sp_{\mathrm{Sim}}(f) = sp_{\text{entry}} - \min_{t} (sp_{t})$$
+
+*พิสูจน์ได้ว่า:* ค่า peak stack ที่รันผ่าน Single-File Simulator ($\Delta sp_{\mathrm{Sim}}$) จะมีค่าขอบเขตบนสอดคล้องกับ $\mathit{StackPeak}$ ของ AST เสมอ โดยบวกเพิ่มด้วยค่าการ Push Callee-Saved Registers ที่คงที่ ($O(1)$) ตามข้อกำหนด AAPCS
+
+#### Theorem 4 (ISR Auto-Stacking Bound Extension)
+
+กรณีคิดรวม Interrupt Service Routine (ISR) ของ ARM Cortex-M บน Physical Frame:
+
+$$\mathit{StackPeak}_{\mathrm{Hardware}} = \mathit{StackPeak}_{\mathrm{AST}} + \max_{f \in V}(\mathit{FrameOverhead}_{\mathrm{ARM}}(f)) + 32\text{ bytes (Auto-Stacking Context)}$$
+
+*(หมายเหตุ: 32 bytes คือพื้นที่ $xPSR, PC, LR, R12, R3, R2, R1, R0$ ที่ฮาร์ดแวร์ ARM Push ให้อัตโนมัติเมื่อเกิด Exception)*
+
+---
+
+### Single-File Pure C Engine (`marm_sim.c`)
+
+เวลาเขียนเป็นโค้ด Pure C ไฟล์เดียว สมการข้างบนทั้งหมดจะถูกลดรูปให้กลายเป็น **State Machine Loop จิ๋ว** ไม่เกิน 150 บรรทัด:
+
+```c
+// marm_sim.c - Lightweight Armv7-M Stack Verification Engine
+typedef struct {
+    uint32_t R[16];        // R0-R12, SP(R13), LR(R14), PC(R15)
+    uint32_t peak_stack;   // Tracking worst-case stack depth
+    uint32_t initial_sp;   // Preservation validation
+} ArmSimState;
+
+void sim_step_instruction(ArmSimState *sim, uint16_t instr) {
+    // [E-SUB-SP] Implementation
+    if ((instr & 0xFF80) == 0xB080) { // SUB SP, #imm
+        uint32_t imm = (instr & 0x7F) << 2;
+        sim->R[13] -= imm;
+        
+        // Track Peak Stack Usage
+        uint32_t current_depth = sim->initial_sp - sim->R[13];
+        if (current_depth > sim->peak_stack) {
+            sim->peak_stack = current_depth;
+        }
+    }
+    // [E-ADD-SP] Implementation
+    else if ((instr & 0xFF80) == 0xB000) { // ADD SP, #imm
+        uint32_t imm = (instr & 0x7F) << 2;
+        sim->R[13] += imm;
+    }
+    // [E-PUSH] & [E-POP] Handle Register alignment and LR/PC saving...
+}
+
+```
+
