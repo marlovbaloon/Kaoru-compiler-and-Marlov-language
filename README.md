@@ -1,7 +1,7 @@
 # Kaoru Compiler (Marlov Language)
 
 **Kaoru** is an experimental ahead-of-time (AOT) frontend and code-generation pipeline for the **Marlov Programming Language**. Designed with a strict "Readable First, Keep It Simple, Stupid (KISS), and No Over-Engineering" philosophy, Kaoru translates Marlov high-level source files (`.ml`) and header interface declarations (`.mlov`) into platform-native assembly (x86_64 and AArch64) with runtime hardware signature verification.
-
+Paper:https://zenodo.org/records/23027651
 ---
 
 ## 📌 Research Branch Notice: ARM Cortex-M Target
