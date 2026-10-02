@@ -7,7 +7,17 @@
 #include "mtypes.h"
 
 /* =========================================================================
- * Forward Declarations & Helpers
+ * Macros & Alignment Helpers (AAPCS Compliance: Align8)
+ * ========================================================================= */
+#define ALIGN8(x) (((x) + 7) & ~7)
+
+static inline int get_safe_offset(int offset) {
+    int aligned = ALIGN8(offset);
+    return (aligned <= 0) ? 8 : aligned;
+}
+
+/* =========================================================================
+ * Forward Declarations
  * ========================================================================= */
 void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
 void generate_print_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx);
@@ -47,13 +57,8 @@ static const char *ARG_REGS[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
 static const char *ARG_REGS[] = {"x0", "x1", "x2", "x3", "x4", "x5"};
 #endif
 
-/* Helper to get safe stack offset (min 8 bytes alignment) */
-static inline int get_safe_offset(int offset) {
-    return (offset <= 0) ? 8 : offset;
-}
-
 /* =========================================================================
- * Runtime Helpers (C-Level Abstraction - Compiled separately or linked)
+ * Runtime Helpers
  * ========================================================================= */
 void mlov_print_int(int64_t val) {
     printf("%ld\n", val);
@@ -64,7 +69,7 @@ void mlov_print_str(const char *val) {
 }
 
 /* =========================================================================
- * Cross-Platform Hardware Signature Generator (Host/Target Helper)
+ * Cross-Platform Hardware Signature Generator
  * ========================================================================= */
 uint64_t get_hardware_signature(void) {
     uint64_t signature = 0;
@@ -103,17 +108,13 @@ uint64_t get_hardware_signature(void) {
 }
 
 /* =========================================================================
- * Security Gatekeeper Assembly Output (Target Binary Routine)
+ * Security Gatekeeper & Header/Footer Emission
  * ========================================================================= */
 void generate_runtime_header(FILE *out, SecurityContext *sec_ctx) {
     fprintf(out, "# --- KAORU RUNTIME ASSEMBLY GENERATED FILE ---\n");
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, ".intel_syntax noprefix\n");
 #endif
-
-    /* 
-     * Emit .text section explicitly first to anchor overall code generation
-     */
     fprintf(out, ".text\n");
 
     if (sec_ctx) {
@@ -122,10 +123,6 @@ void generate_runtime_header(FILE *out, SecurityContext *sec_ctx) {
     }
 }
 
-/* 
- * Add non-executable stack note directive at the END of code generation file
- * or inside a dedicated footer function to prevent spilling into .text
- */
 void generate_runtime_footer(FILE *out) {
 #if defined(__ELF__) || defined(__linux__)
     fprintf(out, "\n# Suppress non-executable stack linker warning\n");
@@ -173,7 +170,6 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 
         case NODE_VAR_REF: {
             int off = get_safe_offset(node->stack_offset);
-            /* Check if the first character is not null byte */
             fprintf(out, "    # Symbol reference: %s\n", (node->var_name[0] != '\0') ? node->var_name : "unnamed");
 #if defined(__x86_64__) || defined(_M_X64)
             fprintf(out, "    mov rax, QWORD PTR [rbp - %d]\n", off);
@@ -182,12 +178,12 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 #endif
             break;
         }
+
         case NODE_VAR_DECL: {
             if (node->left) {
                 generate_code_from_ast(out, node->left, sec_ctx);
             }
             int off = get_safe_offset(node->stack_offset);
-            /* Check if the first character is not null byte */
             fprintf(out, "    # Variable Decl: %s initialized at offset -%d\n", (node->var_name[0] != '\0') ? node->var_name : "unnamed", off);
 #if defined(__x86_64__) || defined(_M_X64)
             fprintf(out, "    mov QWORD PTR [rbp - %d], rax\n", off);
@@ -244,7 +240,6 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 #endif
             break;
 
-        /* Arithmetic & Bitwise Logic */
         case NODE_ADD:
         case NODE_SUB:
         case NODE_MUL:
@@ -263,7 +258,6 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             generate_binary_op_asm(out, node, sec_ctx);
             break;
 
-        /* Pointer Operations */
         case NODE_DEREF:
         case NODE_ADDR_OF:
             generate_unary_op_asm(out, node, sec_ctx);
@@ -273,7 +267,6 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
             generate_index_asm(out, node, sec_ctx);
             break;
 
-        /* Byte Access Directives */
         case NODE_LOAD_BYTE:
         case NODE_STORE_BYTE:
             generate_byte_access_asm(out, node, sec_ctx);
@@ -299,7 +292,7 @@ void generate_code_from_ast(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 }
 
 /* =========================================================================
- * Generate Assembly for Function Declarations, Calls & Returns
+ * Function Declarations, Calls & Returns
  * ========================================================================= */
 void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_FUNC_DECL) return;
@@ -307,9 +300,9 @@ void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
     fprintf(out, "\n.global %s\n", node->var_name);
     fprintf(out, "%s:\n", node->var_name);
 
-    /* Calculate frame size (aligned to 16 bytes for System V ABI / ARM64) */
-    int raw_stack_size = (node->local_stack_size < 32) ? 32 : node->local_stack_size;
-    int aligned_stack_size = (raw_stack_size + 15) & ~15;
+    /* Enforce AAPCS 8-byte stack frame alignment via ALIGN8 */
+    int raw_stack_size = (node->local_stack_size < 16) ? 16 : node->local_stack_size;
+    int aligned_stack_size = ALIGN8(raw_stack_size);
 
 #if defined(__x86_64__) || defined(_M_X64)
     fprintf(out, "    push rbp\n");
@@ -330,10 +323,11 @@ void generate_func_decl_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
         if (i < 6) {
             fprintf(out, "    # param [%s] passed via %s\n", node->params[i], ARG_REGS[i]);
             if (node->param_stack_offsets && node->param_stack_offsets[i] > 0) {
+                int off = get_safe_offset(node->param_stack_offsets[i]);
 #if defined(__x86_64__) || defined(_M_X64)
-                fprintf(out, "    mov QWORD PTR [rbp - %d], %s\n", node->param_stack_offsets[i], ARG_REGS[i]);
+                fprintf(out, "    mov QWORD PTR [rbp - %d], %s\n", off, ARG_REGS[i]);
 #elif defined(__aarch64__) || defined(_M_ARM64)
-                fprintf(out, "    str %s, [x29, #-%d]\n", ARG_REGS[i], node->param_stack_offsets[i]);
+                fprintf(out, "    str %s, [x29, #-%d]\n", ARG_REGS[i], off);
 #endif
             }
         }
@@ -359,7 +353,6 @@ void generate_func_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 
     fprintf(out, "    # --- Function Call: %s (%d args) ---\n", node->var_name, node->arg_count);
 
-    /* Evaluate args and push onto stack */
     for (int i = 0; i < node->arg_count; i++) {
         generate_code_from_ast(out, node->args[i], sec_ctx);
 #if defined(__x86_64__) || defined(_M_X64)
@@ -369,7 +362,6 @@ void generate_func_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) 
 #endif
     }
 
-    /* Pop evaluation results into target register locations according to ABI */
     for (int i = node->arg_count - 1; i >= 0; i--) {
         if (i < 6) {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -418,7 +410,7 @@ void generate_return_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 }
 
 /* =========================================================================
- * Generate Assembly for Builtin Directives (@open, @read, @write, etc.)
+ * Builtin Directives (@open, @read, @write, etc.)
  * ========================================================================= */
 void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_BUILTIN_CALL) return;
@@ -493,7 +485,7 @@ void generate_builtin_call_asm(FILE *out, ASTNode *node, SecurityContext *sec_ct
 }
 
 /* =========================================================================
- * Generate Assembly for Block Scopes
+ * Block Scopes
  * ========================================================================= */
 void generate_block_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_BLOCK) return;
@@ -505,7 +497,7 @@ void generate_block_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 }
 
 /* =========================================================================
- * Generate Assembly for @print
+ * @print Assembly Output
  * ========================================================================= */
 void generate_print_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != PRINT_NODE || !node->left) return;
@@ -529,7 +521,7 @@ void generate_print_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 }
 
 /* =========================================================================
- * Generate Assembly for Conditional If Statements
+ * Control Flow: Conditional If Statements
  * ========================================================================= */
 void generate_if_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_IF || !node->cond) return;
@@ -572,7 +564,7 @@ void generate_if_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 }
 
 /* =========================================================================
- * Generate Assembly for While Loops
+ * Control Flow: Loops
  * ========================================================================= */
 void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_WHILE || !node->cond) return;
@@ -602,9 +594,6 @@ void generate_while_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     fprintf(out, "    # --- While Statement End ---\n");
 }
 
-/* =========================================================================
- * Generate Assembly for For Loops
- * ========================================================================= */
 void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_FOR) return;
 
@@ -646,7 +635,7 @@ void generate_for_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 }
 
 /* =========================================================================
- * Generate Assembly for Unary Operations (*p, &x)
+ * Unary Operations
  * ========================================================================= */
 void generate_unary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node) return;
@@ -680,7 +669,7 @@ void generate_unary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 }
 
 /* =========================================================================
- * Generate Assembly for Pointer Offset & Array Indexing (arr[i])
+ * Pointer Offset & Array Indexing
  * ========================================================================= */
 void generate_index_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node || node->type != NODE_INDEX) return;
@@ -709,7 +698,7 @@ void generate_index_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
 }
 
 /* =========================================================================
- * Generate Assembly for Byte Loading/Storing (8-bit Access)
+ * Byte Loading / Storing (8-bit Access)
  * ========================================================================= */
 void generate_byte_access_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     if (!node) return;
@@ -743,7 +732,7 @@ void generate_byte_access_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx
 }
 
 /* =========================================================================
- * Generate Assembly for Binary Operations (Arithmetic & Bitwise Logic)
+ * Binary Operations
  * ========================================================================= */
 void generate_binary_op_asm(FILE *out, ASTNode *node, SecurityContext *sec_ctx) {
     generate_code_from_ast(out, node->right, sec_ctx);
