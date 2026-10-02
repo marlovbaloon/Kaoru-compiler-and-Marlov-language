@@ -18,10 +18,26 @@ static ASTNode* parse_unary(FILE *in, Token *current_tok);
 
 static ASTArena global_arena = {NULL, 0, 0};
 
+/* Unify AST Allocation with Global Arena Priority */
+static ASTNode* create_ast_node(ASTNodeType type) {
+    ASTNode *node = NULL;
+    if (global_arena.nodes && global_arena.count < global_arena.capacity) {
+        node = &global_arena.nodes[global_arena.count++];
+        memset(node, 0, sizeof(ASTNode));
+    } else {
+        node = (ASTNode *)calloc(1, sizeof(ASTNode));
+        if (!node) {
+            fprintf(stderr, "[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+    node->type = type;
+    return node;
+}
+
 void register_symbol(SymbolTable *symtab, const char *name, SymbolKind kind, bool is_declared, bool is_defined) {
     if (!symtab || !name) return;
 
-    /* Check duplicate symbol entry */
     Symbol *curr = symtab->head;
     while (curr) {
         if (strcmp(curr->name, name) == 0) {
@@ -31,14 +47,12 @@ void register_symbol(SymbolTable *symtab, const char *name, SymbolKind kind, boo
         curr = curr->next;
     }
 
-    /* Allocate and register new symbol */
-    Symbol *sym = (Symbol *)malloc(sizeof(Symbol));
+    Symbol *sym = (Symbol *)calloc(1, sizeof(Symbol));
     if (!sym) {
         fprintf(stderr, "[Kaoru Fatal Error]: Symbol allocation failed\n");
         exit(EXIT_FAILURE);
     }
-    memset(sym, 0, sizeof(Symbol));
-    strncpy(sym->name, name, sizeof(sym->name) - 1);
+    snprintf(sym->name, sizeof(sym->name), "%s", name);
     sym->kind = kind;
     sym->is_declared = is_declared;
     sym->is_defined = is_defined;
@@ -53,46 +67,21 @@ void init_ast_arena(size_t initial_capacity) {
 }
 
 static BuiltinKind resolve_builtin_kind(const char *name) {
-    if (strcmp(name, "open") == 0)   return BUILTIN_OPEN;
-    if (strcmp(name, "read") == 0)   return BUILTIN_READ;
-    if (strcmp(name, "write") == 0)  return BUILTIN_WRITE;
-    if (strcmp(name, "close") == 0)  return BUILTIN_CLOSE;
-    if (strcmp(name, "alloc") == 0)  return BUILTIN_ALLOC;
-    if (strcmp(name, "free") == 0)   return BUILTIN_FREE;
-    if (strcmp(name, "sizeof") == 0) return BUILTIN_SIZEOF;
-    if (strcmp(name, "exit") == 0)   return BUILTIN_EXIT;
-    if (strcmp(name, "panic") == 0)  return BUILTIN_PANIC;
-    if (strcmp(name, "load_b") == 0) return BUILTIN_LOAD8;
+    if (strcmp(name, "open") == 0)    return BUILTIN_OPEN;
+    if (strcmp(name, "read") == 0)    return BUILTIN_READ;
+    if (strcmp(name, "write") == 0)   return BUILTIN_WRITE;
+    if (strcmp(name, "close") == 0)   return BUILTIN_CLOSE;
+    if (strcmp(name, "alloc") == 0)   return BUILTIN_ALLOC;
+    if (strcmp(name, "free") == 0)    return BUILTIN_FREE;
+    if (strcmp(name, "sizeof") == 0)  return BUILTIN_SIZEOF;
+    if (strcmp(name, "exit") == 0)    return BUILTIN_EXIT;
+    if (strcmp(name, "panic") == 0)   return BUILTIN_PANIC;
+    if (strcmp(name, "load_b") == 0)  return BUILTIN_LOAD8;
     if (strcmp(name, "store_b") == 0) return BUILTIN_STORE8;
     return (BuiltinKind)-1;
 }
-// allocation helper
-static ASTNode *ast_node_alloc(ASTArena *arena) {
-    if (arena && arena->count < arena->capacity) {
-        ASTNode *node = &arena->nodes[arena->count++];
-        memset(node, 0, sizeof(ASTNode));
-        return node;
-    }
-    ASTNode *node = (ASTNode *)calloc(1, sizeof(ASTNode));
-    if (!node) {
-        fprintf(stderr, "Fatal Error: Out of memory for ASTNode\n");
-        exit(1);
-    }
-    return node;
-}
-/* =========================================================================
- * AST Node Creation Helpers
- * ========================================================================= */
-static ASTNode* create_ast_node(ASTNodeType type) {
-    ASTNode *node = (ASTNode *)calloc(1, sizeof(ASTNode));
-    if (!node) {
-        printf("[Kaoru Memory Error]: Allocation failed for ASTNode!\n");
-        exit(EXIT_FAILURE);
-    }
-    node->type = type;
-    return node;
-}
 
+/* AST Node Creation Helpers */
 ASTNode* create_int_node(int val) {
     ASTNode *node = create_ast_node(NODE_INT);
     node->val = val;
@@ -130,7 +119,7 @@ ASTNode* create_div_node(ASTNode* left, ASTNode* right) {
 ASTNode* create_var_decl_node(MTokenType data_type, const char* name, ASTNode* expr) {
     ASTNode *node = create_ast_node(NODE_VAR_DECL);
     node->data_type = data_type; 
-    strncpy(node->var_name, name, sizeof(node->var_name) - 1);
+    snprintf(node->var_name, sizeof(node->var_name), "%s", name);
     node->left = expr; 
     node->val = (data_type == TOKEN_AT_CHAR) ? 1 : 8;
     return node;
@@ -138,8 +127,8 @@ ASTNode* create_var_decl_node(MTokenType data_type, const char* name, ASTNode* e
 
 ASTNode* create_string_node(const char* str_val) {
     ASTNode *node = create_ast_node(NODE_STR);
-    strncpy(node->str_val, str_val, sizeof(node->str_val) - 1);
-    strncpy(node->var_name, str_val, sizeof(node->var_name) - 1);
+    snprintf(node->str_val, sizeof(node->str_val), "%s", str_val);
+    snprintf(node->var_name, sizeof(node->var_name), "%s", str_val);
     return node;
 }
 
@@ -166,8 +155,7 @@ ASTNode* create_if_node(ASTNode* cond, ASTNode* then_branch, ASTNode* else_branc
 ASTNode* create_while_node(ASTNode* cond, ASTNode* body) {
     ASTNode *node = create_ast_node(NODE_WHILE);
     node->cond = cond;          
-    node->then_branch = body;   
-    node->body = body;
+    node->body = body; /* Fixed double assignment to then_branch */
     return node;
 }
 
@@ -201,14 +189,14 @@ ASTNode* create_index_node(ASTNode *target, ASTNode *index) {
 ASTNode* create_member_node(ASTNode *target, const char *field_name, bool is_arrow) {
     ASTNode *node = create_ast_node(NODE_MEMBER_REF);
     node->left = target;
-    strncpy(node->member_name, field_name, sizeof(node->member_name) - 1);
+    snprintf(node->member_name, sizeof(node->member_name), "%s", field_name);
     node->val = is_arrow ? 1 : 0;
     return node;
 }
 
 ASTNode* create_func_decl_node(const char *name, char **params, int param_count, ASTNode *body) {
     ASTNode *node = create_ast_node(NODE_FUNC_DECL);
-    strncpy(node->var_name, name, sizeof(node->var_name) - 1);
+    snprintf(node->var_name, sizeof(node->var_name), "%s", name);
     node->params = params;
     node->param_count = param_count;
     node->func_body = body;
@@ -217,7 +205,7 @@ ASTNode* create_func_decl_node(const char *name, char **params, int param_count,
 
 ASTNode* create_func_call_node(const char *name, ASTNode **args, int arg_count) {
     ASTNode *node = create_ast_node(NODE_FUNC_CALL);
-    strncpy(node->var_name, name, sizeof(node->var_name) - 1);
+    snprintf(node->var_name, sizeof(node->var_name), "%s", name);
     node->args = args;
     node->arg_count = arg_count;
     return node;
@@ -229,18 +217,6 @@ ASTNode* create_return_node(ASTNode *expr) {
     return node;
 }
 
-ASTNode* create_exit_node(ASTNode *expr) {
-    ASTNode *node = create_ast_node(NODE_EXIT);
-    node->left = expr;
-    return node;
-}
-
-ASTNode* create_panic_node(ASTNode *expr) {
-    ASTNode *node = create_ast_node(NODE_PANIC);
-    node->left = expr;
-    return node;
-}
-
 ASTNode* create_builtin_node(BuiltinKind kind, ASTNode **args, int arg_count) {
     ASTNode *node = create_ast_node(NODE_BUILTIN_CALL);
     node->builtin_kind = kind;
@@ -248,95 +224,7 @@ ASTNode* create_builtin_node(BuiltinKind kind, ASTNode **args, int arg_count) {
     node->arg_count = arg_count;
     return node;
 }
-/* 1. Extended Bitwise & Shift Nodes */
-ASTNode *make_node_bitwise(ASTArena *arena, ASTNodeType type, ASTNode *left, ASTNode *right) {
-    ASTNode *node = ast_node_alloc(arena);
-    node->type = type; /* NODE_BIT_AND, NODE_BIT_OR, NODE_BIT_XOR, NODE_SHL, NODE_SHR */
-    node->left = left;
-    node->right = right;
-    return node;
-}
 
-/* 2. Pointer operations (Deref, Address-of, Index) */
-ASTNode *make_node_addr_of(ASTArena *arena, ASTNode *target) {
-    ASTNode *node = ast_node_alloc(arena);
-    node->type = NODE_ADDR_OF;
-    node->ptr = target;
-    return node;
-}
-
-ASTNode *make_node_deref(ASTArena *arena, ASTNode *ptr) {
-    ASTNode *node = ast_node_alloc(arena);
-    node->type = NODE_DEREF;
-    node->ptr = ptr;
-    return node;
-}
-
-ASTNode *make_node_index(ASTArena *arena, ASTNode *ptr, ASTNode *offset) {
-    ASTNode *node = ast_node_alloc(arena);
-    node->type = NODE_INDEX;
-    node->ptr = ptr;
-    node->offset = offset;
-    return node;
-}
-
-ASTNode *make_node_assign_ptr(ASTArena *arena, ASTNode *ptr, ASTNode *value) {
-    ASTNode *node = ast_node_alloc(arena);
-    node->type = NODE_ASSIGN_PTR;
-    node->ptr = ptr;
-    node->right = value;
-    return node;
-}
-
-/* 3. Struct & Member Access Nodes */
-ASTNode *make_node_member_ref(ASTArena *arena, ASTNode *ptr, const char *member_name, int offset) {
-    ASTNode *node = ast_node_alloc(arena);
-    node->type = NODE_MEMBER_REF;
-    node->ptr = ptr;
-    if (member_name) {
-        strncpy(node->member_name, member_name, sizeof(node->member_name) - 1);
-    }
-    node->member_offset = offset;
-    return node;
-}
-
-/* 4. Bare-metal / Low-level Memory Primitives (Byte Operations) */
-ASTNode *make_node_char(ASTArena *arena, char ch) {
-    ASTNode *node = ast_node_alloc(arena);
-    node->type = NODE_CHAR;
-    node->val = (int)ch;
-    node->is_byte_op = true;
-    return node;
-}
-
-ASTNode *make_node_load_byte(ASTArena *arena, ASTNode *ptr, ASTNode *offset) {
-    ASTNode *node = ast_node_alloc(arena);
-    node->type = NODE_LOAD_BYTE;
-    node->ptr = ptr;
-    node->offset = offset;
-    node->is_byte_op = true;
-    return node;
-}
-
-ASTNode *make_node_store_byte(ASTArena *arena, ASTNode *ptr, ASTNode *offset, ASTNode *value) {
-    ASTNode *node = ast_node_alloc(arena);
-    node->type = NODE_STORE_BYTE;
-    node->ptr = ptr;
-    node->offset = offset;
-    node->right = value;
-    node->is_byte_op = true;
-    return node;
-}
-
-/* 5. Builtin Call Node */
-ASTNode *make_node_builtin(ASTArena *arena, BuiltinKind kind, ASTNode **args, int arg_count) {
-    ASTNode *node = ast_node_alloc(arena);
-    node->type = NODE_BUILTIN_CALL;
-    node->builtin_kind = kind;
-    node->args = args;
-    node->arg_count = arg_count;
-    return node;
-}
 void free_ast(ASTNode *node) {
     if (!node) return;
     
@@ -393,7 +281,6 @@ void free_ast(ASTNode *node) {
 
     if (node->type == NODE_WHILE) {
         free_ast(node->cond);
-        free_ast(node->then_branch);
         free_ast(node->body);
         free(node);
         return;
@@ -406,9 +293,7 @@ void free_ast(ASTNode *node) {
     free(node);
 }
 
-/* =========================================================================
- * Security Context Initialization
- * ========================================================================= */
+/* Security Context Initialization */
 void parse_program(FILE *in, SecurityContext *sec_ctx) {
     if (!in || !sec_ctx) return;
     long original_pos = ftell(in);
@@ -430,9 +315,6 @@ void parse_program(FILE *in, SecurityContext *sec_ctx) {
     fseek(in, original_pos, SEEK_SET);
 }
 
-/* =========================================================================
- * Expression & Statement Recursive Descent Parser
- * ========================================================================= */
 bool parse_mlov_header(const char *mlov_path, SymbolTable *symtab, SecurityContext *sec_ctx) {
     (void)sec_ctx;
     FILE *f = fopen(mlov_path, "r");
@@ -548,8 +430,7 @@ static ASTNode* parse_primary(FILE *in, Token *current_tok) {
         }
 
         char name[32];
-        strncpy(name, current_tok->value, sizeof(name) - 1);
-        name[sizeof(name) - 1] = '\0';
+        snprintf(name, sizeof(name), "%s", current_tok->value);
         *current_tok = next_token(in);
 
         if (current_tok->type == TOKEN_LPAREN) {
@@ -560,11 +441,17 @@ static ASTNode* parse_primary(FILE *in, Token *current_tok) {
             if (current_tok->type != TOKEN_RPAREN) {
                 while (1) {
                     ASTNode *arg = parse_expression(in, current_tok);
-                    if (!arg) return NULL;
+                    if (!arg) {
+                        for (int i = 0; i < arg_count; i++) free_ast(args[i]);
+                        free(args);
+                        return NULL;
+                    }
 
                     if (arg_count >= capacity) {
                         capacity = (capacity == 0) ? 4 : capacity * 2;
-                        args = (ASTNode **)realloc(args, sizeof(ASTNode*) * capacity);
+                        ASTNode **new_args = (ASTNode **)realloc(args, sizeof(ASTNode*) * capacity);
+                        if (!new_args) { free(args); exit(EXIT_FAILURE); }
+                        args = new_args;
                     }
                     args[arg_count++] = arg;
 
@@ -579,13 +466,15 @@ static ASTNode* parse_primary(FILE *in, Token *current_tok) {
                 *current_tok = next_token(in);
             } else {
                 printf("[Kaoru Syntax Error Line %u]: Expected ')' after function call arguments\n", current_tok->line);
+                for (int i = 0; i < arg_count; i++) free_ast(args[i]);
+                free(args);
                 return NULL;
             }
             return create_func_call_node(name, args, arg_count);
         }
 
         ASTNode *var_ref = create_ast_node(NODE_VAR_REF);
-        strncpy(var_ref->var_name, name, sizeof(var_ref->var_name) - 1);
+        snprintf(var_ref->var_name, sizeof(var_ref->var_name), "%s", name);
         return var_ref;
     }
 
@@ -636,8 +525,7 @@ static ASTNode* parse_postfix(FILE *in, Token *current_tok) {
             }
             
             char field_name[32];
-            strncpy(field_name, current_tok->value, sizeof(field_name) - 1);
-            field_name[sizeof(field_name) - 1] = '\0';
+            snprintf(field_name, sizeof(field_name), "%s", current_tok->value);
             *current_tok = next_token(in);
             
             node = create_member_node(node, field_name, is_arrow);
@@ -901,8 +789,7 @@ static ASTNode* parse_func_decl(FILE *in, Token *current_tok) {
     }
 
     char func_name[32];
-    strncpy(func_name, current_tok->value, sizeof(func_name) - 1);
-    func_name[sizeof(func_name) - 1] = '\0';
+    snprintf(func_name, sizeof(func_name), "%s", current_tok->value);
     *current_tok = next_token(in);
 
     if (current_tok->type != TOKEN_LPAREN) {
@@ -918,6 +805,8 @@ static ASTNode* parse_func_decl(FILE *in, Token *current_tok) {
         while (1) {
             if (current_tok->type != TOKEN_IDENTIFIER) {
                 printf("[Kaoru Syntax Error Line %u]: Expected parameter name\n", current_tok->line);
+                for (int i = 0; i < param_count; i++) free(params[i]);
+                free(params);
                 return NULL;
             }
             if (param_count >= capacity) {
@@ -940,6 +829,8 @@ static ASTNode* parse_func_decl(FILE *in, Token *current_tok) {
         *current_tok = next_token(in);
     } else {
         printf("[Kaoru Syntax Error Line %u]: Expected ')' after parameters\n", current_tok->line);
+        for (int i = 0; i < param_count; i++) free(params[i]);
+        free(params);
         return NULL;
     }
 
@@ -998,64 +889,30 @@ static ASTNode* parse_statement(FILE *in, Token *current_tok) {
             return NULL;
         }
 
-        char var_name[32];
-        strncpy(var_name, current_tok->value, sizeof(var_name) - 1);
-        var_name[sizeof(var_name) - 1] = '\0';
+        char name[32];
+        snprintf(name, sizeof(name), "%s", current_tok->value);
+        *current_tok = next_token(in);
 
-        *current_tok = next_token(in); 
-        if (current_tok->type != TOKEN_ASSIGN) {
-            printf("[Kaoru Syntax Error Line %u]: Expected '=' after '%s'\n", current_tok->line, var_name);
-            return NULL;
+        ASTNode *init_expr = NULL;
+        if (current_tok->type == TOKEN_ASSIGN) {
+            *current_tok = next_token(in);
+            init_expr = parse_expression(in, current_tok);
         }
-
-        *current_tok = next_token(in); 
-
-        ASTNode *expr = parse_expression(in, current_tok);
-        if (!expr) return NULL;
 
         if (current_tok->type == TOKEN_SEMICOLON) {
-            *current_tok = next_token(in); 
-        } else {
-            printf("[Kaoru Syntax Error Line %u]: Expected ';' at end of declaration\n", current_tok->line);
-            free_ast(expr);
-            return NULL;
+            *current_tok = next_token(in);
         }
 
-        return create_var_decl_node(var_type, var_name, expr);
+        return create_var_decl_node(var_type, name, init_expr);
     }
 
-    if (current_tok->value[0] == '@') {
-        const char *name = current_tok->value + 1;
-        if ((int)resolve_builtin_kind(name) != -1) {
-            ASTNode *builtin = parse_builtin_call(in, current_tok);
-            if (current_tok->type == TOKEN_SEMICOLON) {
-                *current_tok = next_token(in);
-            }
-            return builtin;
-        }
-    }
-
-    if (current_tok->type == TOKEN_AT_EXIT) {
+    /* Fallback expression statement */
+    ASTNode *expr = parse_expression(in, current_tok);
+    if (current_tok->type == TOKEN_SEMICOLON) {
         *current_tok = next_token(in);
-        ASTNode *expr = parse_expression(in, current_tok);
-        if (current_tok->type == TOKEN_SEMICOLON) *current_tok = next_token(in);
-        return create_exit_node(expr);
     }
-    if (current_tok->type == TOKEN_AT_PANIC) {
-        *current_tok = next_token(in);
-        ASTNode *expr = parse_expression(in, current_tok);
-        if (current_tok->type == TOKEN_SEMICOLON) *current_tok = next_token(in);
-        return create_panic_node(expr);
-    }
-
-    ASTNode *expr = parse_relational(in, current_tok);
-    if (expr && current_tok->type == TOKEN_SEMICOLON) {
-        *current_tok = next_token(in); 
-    }
-    
     return expr;
 }
-
 ASTNode* parse(FILE *in) {
     if (!in) return NULL;
     Token tok = next_token(in);
